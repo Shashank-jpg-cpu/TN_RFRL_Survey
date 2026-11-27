@@ -3,7 +3,7 @@
  * Tamil Nadu Forest Department
  */
 
-const DB_NAME = 'TN_Forest_RFRL_Survey_DB_v4';
+const DB_NAME = 'TN_Forest_RFRL_Survey_DB_v5';
 const DB_VERSION = 1;
 
 class SurveyDB {
@@ -45,6 +45,7 @@ class SurveyDB {
             request.onsuccess = async (event) => {
                 this.db = event.target.result;
                 await this.seedDemoData();
+                this.pullFromCloud().catch(() => {});
                 resolve(this.db);
             };
 
@@ -106,6 +107,21 @@ class SurveyDB {
         }
 
         // Seed demo field staff accounts created by DFOs
+        // Always ensure Ranipet shashank is registered across all devices
+        const shashankRecord = await this.get('users', 'shashank');
+        if (!shashankRecord) {
+            await this.put('users', {
+                username: 'shashank',
+                password: 'shashank@123',
+                name: 'Shashank (Field Officer)',
+                role: 'FIELD_OFFICER',
+                division: 'Ranipet',
+                range: 'Ranipet Range',
+                created_at: new Date().toISOString(),
+                created_by: 'DFO (Ranipet)'
+            });
+        }
+
         const userCount = await this.count('users');
         if (userCount === 0) {
             const demoStaff = [
@@ -211,6 +227,9 @@ class SurveyDB {
     // FIELD STAFF MANAGEMENT (DFO creates login credentials, limit 5 per range)
     // -------------------------------------------------------------------------
     async getFieldStaffByDivision(division) {
+        if (navigator.onLine) {
+            try { await this.pullFromCloud(); } catch(e) {}
+        }
         const allUsers = await this.getAll('users');
         return allUsers.filter(u => u.role === 'FIELD_OFFICER' && u.division.toLowerCase() === division.toLowerCase());
     }

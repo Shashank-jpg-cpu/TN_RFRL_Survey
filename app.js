@@ -277,6 +277,10 @@ function checkAuthSession() {
     document.getElementById('userRoleBadge').textContent = user.role === 'DFO' ? 'DFO' : 'FIELD';
     document.getElementById('userDivisionName').textContent = user.role === 'DFO' ? user.division : `${user.division} (${user.range})`;
     document.getElementById('headerPortalSubtitle').textContent = user.role === 'DFO' ? `DFO MASTER PORTAL — ${user.division.toUpperCase()}` : `FIELD SURVEY PORTAL — ${user.range ? user.range.toUpperCase() : ''}`;
+    const logoutUserEl = document.getElementById('sidebarLogoutUser');
+    if (logoutUserEl) {
+        logoutUserEl.textContent = user.role === 'DFO' ? `DFO ${user.division}` : `${user.username}`;
+    }
 
     if (user.role === 'DFO') {
         setupDfoPortal();
@@ -285,15 +289,55 @@ function checkAuthSession() {
     }
 }
 
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    window.surveyDB.logout();
-    checkAuthSession();
+function handleLogout() {
+    if (confirm('Are you sure you want to log out of the portal?')) {
+        window.surveyDB.logout();
+        checkAuthSession();
+    }
+}
+
+const logoutBtnHeader = document.getElementById('logoutBtn');
+if (logoutBtnHeader) {
+    logoutBtnHeader.addEventListener('click', handleLogout);
+}
+
+// -------------------------------------------------------------------------
+// PWA INSTALLATION PROMPT HANDLER (One-Tap Install for Android & Mobile)
+// -------------------------------------------------------------------------
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
 });
+
+function handleInstallApp() {
+    if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then((choiceResult) => {
+            deferredInstallPrompt = null;
+        });
+    } else {
+        openInstallGuideModal();
+    }
+}
+
+function openInstallGuideModal() {
+    const modal = document.getElementById('installGuideModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeInstallGuideModal() {
+    const modal = document.getElementById('installGuideModal');
+    if (modal) modal.style.display = 'none';
+}
 
 // -------------------------------------------------------------------------
 // 3. DFO PORTAL: MANAGE ONLY THIS DIVISION'S RANGES & KML BOUNDARIES
 // -------------------------------------------------------------------------
 async function setupDfoPortal() {
+    if (navigator.onLine && window.surveyDB.pullFromCloud) {
+        await window.surveyDB.pullFromCloud().catch(() => {});
+    }
     document.getElementById('dfoPanel').style.display = 'block';
     document.getElementById('fieldPanel').style.display = 'none';
     document.getElementById('dfoDivisionTitle').textContent = currentDivision;

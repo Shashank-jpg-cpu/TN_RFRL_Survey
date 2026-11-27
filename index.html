@@ -21,7 +21,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=2').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=3').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -49,14 +49,14 @@
         </div>
 
         <div class="header-right">
-            <!-- Android APK Download Button in Header -->
-            <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" id="btnDownloadApkHeader" class="btn-apk-header" title="Download Android Mobile App (TN RFRL Survey.apk)">
-                <i class="fa-brands fa-android"></i> <span class="hide-mobile">TN RFRL Survey (.apk)</span>
-            </a>
+            <!-- Install Mobile App Button in Header (Desktop / Tablet) -->
+            <button type="button" id="btnDownloadApkHeader" class="btn-apk-header hide-mobile" onclick="handleInstallApp()" title="Install TN RFRL Survey App">
+                <i class="fa-solid fa-mobile-screen-button"></i> <span>Install Mobile App</span>
+            </button>
 
             <!-- Centimeter / RTK Accuracy Mode Guide Button -->
-            <button class="btn-rtk-mode" onclick="openRtkModal()" title="Centimeter & RTK GPS Configuration">
-                <i class="fa-solid fa-crosshairs"></i> <span class="hide-mobile">Centimeter / RTK Mode</span>
+            <button class="btn-rtk-mode hide-mobile" onclick="openRtkModal()" title="Centimeter & RTK GPS Configuration">
+                <i class="fa-solid fa-crosshairs"></i> <span>RTK Mode</span>
             </button>
 
             <!-- Offline / Online Connection Pill -->
@@ -65,11 +65,14 @@
                 <span id="connectionText">ONLINE</span>
             </div>
 
-            <!-- Active User Profile & Division -->
+            <!-- Active User Profile & Division with PROMINENT Logout Button -->
             <div id="userProfile" class="user-profile">
                 <span id="userRoleBadge" class="role-badge">DFO</span>
-                <span id="userDivisionName" class="user-name">Chennai Division</span>
-                <button id="logoutBtn" class="btn-icon" title="Logout"><i class="fa-solid fa-right-from-bracket"></i></button>
+                <span id="userDivisionName" class="user-name">Ranipet</span>
+                <button type="button" id="logoutBtn" class="btn-header-logout" onclick="handleLogout()" title="Log Out from Portal">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <span class="logout-label">Logout</span>
+                </button>
             </div>
         </div>
     </header>
@@ -83,6 +86,14 @@
                 <span id="panelHeaderTitle"><i class="fa-solid fa-layer-group"></i> SURVEY CONTROLS</span>
                 <button class="btn-close-sidebar" onclick="toggleSidebarPanel()" title="Hide Sidebar Panel">
                     <i class="fa-solid fa-chevron-left"></i> Close
+                </button>
+            </div>
+
+            <!-- Prominent Sidebar Logout Button (Always 100% Accessible on Mobile & Desktop) -->
+            <div class="sidebar-logout-card">
+                <button type="button" class="btn-sidebar-logout" onclick="handleLogout()" title="Log Out from Portal">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                    <span>Log Out (<span id="sidebarLogoutUser">Officer</span>)</span>
                 </button>
             </div>
 
@@ -222,13 +233,13 @@
 
                 <!-- Mobile App APK Download Block (DFO Portal) -->
                 <div class="apk-download-box">
-                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-block" title="Download Offline Android App (TN RFRL Survey.apk)">
+                    <button type="button" class="btn-download-apk-block" onclick="handleInstallApp()" title="Install TN RFRL Survey App on Phone">
                         <i class="fa-brands fa-android apk-icon-large"></i>
                         <div class="apk-btn-text">
-                            <span class="apk-btn-title">Download Mobile App (.apk)</span>
-                            <span class="apk-btn-sub">TN RFRL Survey &bull; Offline Android APK</span>
+                            <span class="apk-btn-title">Install Mobile App (TN RFRL Survey)</span>
+                            <span class="apk-btn-sub">Tap to Add to Android Home Screen &bull; Offline Ready</span>
                         </div>
-                    </a>
+                    </button>
                 </div>
 
                 <!-- Field Staff Access Management Button (Opens Dedicated Window) -->
@@ -382,13 +393,13 @@
 
                 <!-- Mobile App APK Download Block (Field Portal) -->
                 <div class="apk-download-box">
-                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-block" title="Download Offline Android App (TN RFRL Survey.apk)">
+                    <button type="button" class="btn-download-apk-block" onclick="handleInstallApp()" title="Install TN RFRL Survey App on Phone">
                         <i class="fa-brands fa-android apk-icon-large"></i>
                         <div class="apk-btn-text">
-                            <span class="apk-btn-title">Download Mobile App (.apk)</span>
-                            <span class="apk-btn-sub">TN RFRL Survey &bull; Offline Android APK</span>
+                            <span class="apk-btn-title">Install Mobile App (TN RFRL Survey)</span>
+                            <span class="apk-btn-sub">Tap to Add to Android Home Screen &bull; Offline Ready</span>
                         </div>
-                    </a>
+                    </button>
                 </div>
 
                 <!-- Field Officer KML Export -->
@@ -611,10 +622,10 @@
                 <div id="loginError" class="login-error" style="display: none;"></div>
 
                 <div class="login-apk-banner">
-                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-login" title="Download Android Mobile App (TN RFRL Survey.apk)">
+                    <button type="button" class="btn-download-apk-login" onclick="handleInstallApp()" title="Install TN RFRL Survey App">
                         <i class="fa-brands fa-android"></i>
-                        <span>Download Mobile App: <b>TN RFRL Survey (.apk)</b></span>
-                    </a>
+                        <span>Install Mobile App: <b>TN RFRL Survey</b></span>
+                    </button>
                 </div>
 
                 <button type="submit" class="btn-primary btn-block btn-lg" style="margin-top: 14px;">
@@ -631,5 +642,39 @@
     <script src="tn_divisions_ranges.js"></script>
     <script src="db.js"></script>
     <script src="app.js"></script>
+    <!-- Mobile App Installation Guide Modal -->
+    <div id="installGuideModal" class="custom-modal" style="display: none;">
+        <div class="modal-content rtk-modal-content">
+            <div class="modal-header">
+                <h3><i class="fa-brands fa-android text-cyan"></i> Install TN RFRL Survey App</h3>
+                <button class="modal-close" onclick="closeInstallGuideModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="line-height: 1.6; font-size: 13px;">
+                <p style="margin-bottom: 12px; color: #f8fafc; font-size: 13px;">
+                    <b>Install this app directly onto your Android phone:</b>
+                </p>
+                <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 14px;">
+                    <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+                        <span style="background: #0284c7; color: #fff; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0;">1</span>
+                        <span>Tap the <b>3 dots menu (⋮)</b> in the top-right corner of Chrome on your phone.</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="background: #0284c7; color: #fff; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0;">2</span>
+                        <span>Tap <b>"Install app"</b> (or <b>"Add to Home screen"</b>).</span>
+                    </div>
+                </div>
+                <p style="color: #38bdf8; font-size: 11.5px; margin-bottom: 8px;">
+                    <i class="fa-solid fa-circle-check"></i> The <b>TN RFRL Survey</b> icon will appear on your phone's home screen.
+                </p>
+                <p style="color: #94a3b8; font-size: 11px;">
+                    It runs full-screen, caches all maps offline in forest areas, and connects to high-accuracy GPS!
+                </p>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end;">
+                <button class="btn-primary" onclick="closeInstallGuideModal()">Understood</button>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>
