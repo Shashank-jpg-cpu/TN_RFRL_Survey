@@ -1,10 +1,11 @@
-const CACHE_NAME = 'tn-forest-survey-v1';
+const CACHE_NAME = 'tn-forest-survey-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './style.css',
   './db.js',
   './app.js',
+  './tn_divisions_ranges.js',
   './manifest.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
@@ -12,12 +13,10 @@ const ASSETS_TO_CACHE = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
-  );
   self.skipWaiting();
+  e.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -33,10 +32,27 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
+// Network-First with offline cache fallback (Never serves stale code when online!)
 self.addEventListener('fetch', (e) => {
+  // Never intercept API routes or APK file downloads
+  if (e.request.url.includes('/api/') || e.request.url.endsWith('.apk')) {
+    return;
+  }
+
   e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
-      return cachedResponse || fetch(e.request).catch(() => caches.match('./index.html'));
-    })
+    fetch(e.request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200 && e.request.method === 'GET') {
+          const responseClone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(e.request, responseClone);
+          });
+        }
+        return networkResponse;
+      })
+      .catch(() => {
+        // Offline in forest: serve from local cache
+        return caches.match(e.request).then((cached) => cached || caches.match('./index.html'));
+      })
   );
 });

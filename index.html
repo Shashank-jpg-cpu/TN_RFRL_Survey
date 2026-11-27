@@ -21,7 +21,16 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').catch(err => console.log('SW reg error:', err));
+                navigator.serviceWorker.register('sw.js?v=2').then(reg => {
+                    reg.update();
+                }).catch(err => console.log('SW reg error:', err));
+            });
+            let refreshing = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (!refreshing) {
+                    refreshing = true;
+                    window.location.reload();
+                }
             });
         }
     </script>
