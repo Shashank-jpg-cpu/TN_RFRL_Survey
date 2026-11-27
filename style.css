@@ -1907,3 +1907,34 @@ body {
     margin-right: 4px;
     letter-spacing: 0.5px;
 }
+
+
+/* Global Header Refresh Button (Visible everywhere: mobile, tablet, APK, desktop) */
+.btn-refresh-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #0284c7, #0369a1);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);
+    transition: all 0.2s ease;
+}
+
+.btn-refresh-header:hover {
+    background: linear-gradient(135deg, #0369a1, #075985);
+    transform: translateY(-1px);
+}
+
+@media (max-width: 768px) {
+    .btn-refresh-header {
+        padding: 5px 8px;
+        font-size: 11px;
+        gap: 4px;
+    }
+}

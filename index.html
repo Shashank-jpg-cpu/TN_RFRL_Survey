@@ -49,6 +49,11 @@
         </div>
 
         <div class="header-right">
+
+            <!-- Global Refresh Database Button (Visible on ALL devices: Mobile, APK, Desktop) -->
+            <button type="button" id="btnHeaderGlobalRefresh" class="btn-refresh-header" onclick="handleGlobalForceRefresh()" title="Sync with Cloud & Refresh All Boundaries">
+                <i class="fa-solid fa-arrows-rotate"></i> <span>Refresh Database</span>
+            </button>
             <!-- Install Mobile App Button in Header (Desktop / Tablet) -->
             <button type="button" id="btnDownloadApkHeader" class="btn-apk-header hide-mobile" onclick="handleInstallApp()" title="Install TN RFRL Survey App">
                 <i class="fa-solid fa-mobile-screen-button"></i> <span>Install Mobile App</span>
@@ -105,7 +110,14 @@
 
                 <!-- Division and Filter Info -->
                 <div class="division-badge-card">
-                    <div>Division: <b id="dfoDivisionTitle">Chennai Division</b></div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <div>Division: <b id="dfoDivisionTitle" class="text-cyan">Chennai Division</b></div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <label style="margin: 0; font-size: 11px; color: #94a3b8;">Switch:</label>
+                            <select id="dfoSwitchDivisionSelect" class="form-control-sm" onchange="switchDfoDivision(this.value)" style="background: #0f172a; color: #38bdf8; border: 1px solid #0284c7; padding: 3px 6px; font-size: 11px; border-radius: 4px; font-weight: 700; cursor: pointer;">
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Range Filter Dropdown (Filtered only to this DFO's ranges!) -->
@@ -118,7 +130,12 @@
 
                 <!-- Boundary Selector -->
                 <div class="form-group">
-                    <label>Select RF / RL Boundary</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <label style="margin: 0;">Select RF / RL Boundary</label>
+                        <button type="button" class="btn-sync-cloud-mini" onclick="handleGlobalForceRefresh()" title="Refresh latest from Cloud" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                        </button>
+                    </div>
                     <select id="dfoBoundarySelect" class="form-control" onchange="loadDfoActiveBoundary()">
                         <option value="">No boundaries loaded</option>
                     </select>
@@ -711,6 +728,9 @@
                     </button>
                 </div>
 
+                <button type="button" class="btn-sync-cloud-login" onclick="handleGlobalForceRefresh()" style="width: 100%; margin-bottom: 12px; background: rgba(2, 132, 199, 0.15); border: 1px solid #0284c7; color: #38bdf8; padding: 9px 12px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer;">
+                    <i class="fa-solid fa-arrows-rotate"></i> Sync Latest Cloud Database (All 51 Divisions)
+                </button>
                 <button type="submit" class="btn-primary btn-block btn-lg" style="margin-top: 14px;">
                     <i class="fa-solid fa-lock"></i> Access Department Portal
                 </button>

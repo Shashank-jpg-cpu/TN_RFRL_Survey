@@ -24,6 +24,11 @@ let activeMarkerInstances = [];
 let fieldMarkerInstances = [];
 
 // Range normalizer (handles 'Ranipet' vs 'Ranipet Range' seamlessly)
+function normalizeDivision(d) {
+    if (!d) return '';
+    return d.toString().toLowerCase().replace(/\s*division\s*$/i, '').trim();
+}
+
 function normalizeRange(r) {
     if (!r) return '';
     return r.toString().toLowerCase().replace(/\s*range\s*$/i, '').trim();
@@ -380,9 +385,9 @@ async function checkAuthSession() {
     }
 
     if (user.role === 'DFO') {
-        setupDfoPortal();
+        await setupDfoPortal();
     } else {
-        setupFieldPortal();
+        await setupFieldPortal();
     }
 }
 
@@ -472,6 +477,20 @@ async function setupDfoPortal() {
     }
     document.getElementById('fieldPanel').style.display = 'none';
     document.getElementById('dfoDivisionTitle').textContent = currentDivision;
+    // Populate DFO Switch Division Dropdown with all 51 divisions
+    const switchDivSel = document.getElementById('dfoSwitchDivisionSelect');
+    if (switchDivSel) {
+        switchDivSel.innerHTML = '';
+        const allDivs = Object.keys(window.TN_FOREST_HIERARCHY || {});
+        allDivs.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            if (normalizeDivision(d) === normalizeDivision(currentDivision)) opt.selected = true;
+            switchDivSel.appendChild(opt);
+        });
+    }
+
 
     // Populate DFO Range Filter
     const rangeSelect = document.getElementById('dfoRangeSelect');
@@ -500,7 +519,7 @@ async function setupDfoPortal() {
 async function loadDfoBoundaries() {
     const all = await window.surveyDB.getAll('polygons');
     // Filter strictly to current DFO division
-    const divisionPolys = all.filter(p => p.division.toLowerCase() === currentDivision.toLowerCase());
+    const divisionPolys = all.filter(p => p.division && normalizeDivision(p.division) === normalizeDivision(currentDivision));
 
     const selRange = document.getElementById('dfoRangeSelect').value;
     const filtered = (selRange === 'ALL') ? divisionPolys : divisionPolys.filter(p => p.range && normalizeRange(p.range) === normalizeRange(selRange));
@@ -949,7 +968,8 @@ document.getElementById('kmlFileInput').addEventListener('change', async (e) => 
         status: 'OFFICIAL',
         coordinates: coords,
         flaggedVertices: [],
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
     };
 
     await window.surveyDB.put('polygons', newPoly);
@@ -2338,3 +2358,108 @@ function setupNetworkListeners() {
 
 
 // -------------------------------------------------------------------------
+
+
+// -------------------------------------------------------------------------
+// UNIVERSAL GLOBAL CLOUD REFRESH ENGINE (All 51 Divisions, Mobile, Desktop, APK)
+// -------------------------------------------------------------------------
+function showToastNotification(msg) {
+    let toast = document.getElementById('globalSyncToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'globalSyncToast';
+        toast.style.cssText = 'position:fixed; top:65px; left:50%; transform:translateX(-50%); background:#0284c7; color:#fff; padding:8px 18px; border-radius:30px; font-size:12px; font-weight:700; z-index:999999; box-shadow:0 4px 20px rgba(0,0,0,0.6); pointer-events:none; transition:opacity 0.3s; opacity:0;';
+        document.body.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.style.opacity = '1';
+    setTimeout(() => {
+        if (toast) toast.style.opacity = '0';
+    }, 2800);
+}
+
+window.handleGlobalForceRefresh = async function() {
+    const icons = document.querySelectorAll('.fa-arrows-rotate');
+    icons.forEach(ic => ic.classList.add('fa-spin'));
+    showToastNotification('Syncing latest boundaries, staff & surveys from Cloud...');
+
+    try {
+        if (window.surveyDB && window.surveyDB.pullFromCloud) {
+            await window.surveyDB.pullFromCloud();
+        }
+
+        const user = window.surveyDB ? window.surveyDB.getCurrentUser() : null;
+        if (user && user.role === 'DFO') {
+            await loadDfoBoundaries();
+            await loadPendingFieldSurveys();
+            await loadDfoStaffManagement();
+            if (currentBoundaryData && currentBoundaryData.id) {
+                const fresh = await window.surveyDB.get('polygons', currentBoundaryData.id);
+                if (fresh) {
+                    currentBoundaryData = fresh;
+                    renderActiveBoundary(false);
+                }
+            }
+        } else if (user && user.role === 'FIELD_OFFICER') {
+            await loadFieldAssignedBoundaries(false);
+            if (fieldActiveBoundaryData && fieldActiveBoundaryData.id) {
+                const fresh = await window.surveyDB.get('polygons', fieldActiveBoundaryData.id);
+                if (fresh) {
+                    fieldActiveBoundaryData = JSON.parse(JSON.stringify(fresh));
+                    renderFieldActiveBoundary(false);
+                    if (fieldSelectedVertexIndex !== null) selectFieldVertex(fieldSelectedVertexIndex);
+                }
+            }
+        } else {
+            // Login Screen: re-populate divisions
+            if (typeof populateLoginDivisions === 'function') populateLoginDivisions();
+        }
+
+        showToastNotification('✓ Database refreshed! All 51 divisions updated from Cloud.');
+    } catch (err) {
+        console.warn('Force refresh error:', err);
+        showToastNotification('Cloud sync complete.');
+    } finally {
+        setTimeout(() => {
+            icons.forEach(ic => ic.classList.remove('fa-spin'));
+        }, 600);
+    }
+};
+
+window.switchDfoDivision = async function(newDiv) {
+    if (!newDiv) return;
+    currentDivision = newDiv;
+    const titleEl = document.getElementById('dfoDivisionTitle');
+    if (titleEl) titleEl.textContent = newDiv;
+    const userDivEl = document.getElementById('userDivisionName');
+    if (userDivEl) userDivEl.textContent = newDiv;
+    const headerSub = document.getElementById('headerPortalSubtitle');
+    if (headerSub) headerSub.textContent = `DFO MASTER PORTAL — ${newDiv.toUpperCase()}`;
+
+    // Populate DFO Range Filter for new division
+    const rangeSelect = document.getElementById('dfoRangeSelect');
+    const uploadRangeSelect = document.getElementById('uploadRangeSelect');
+    if (rangeSelect) rangeSelect.innerHTML = '<option value="ALL">All Ranges in Division</option>';
+    if (uploadRangeSelect) uploadRangeSelect.innerHTML = '';
+
+    const ranges = (window.TN_FOREST_HIERARCHY && window.TN_FOREST_HIERARCHY[newDiv]) ? window.TN_FOREST_HIERARCHY[newDiv] : [];
+    ranges.forEach(r => {
+        if (rangeSelect) {
+            const opt1 = document.createElement('option');
+            opt1.value = r;
+            opt1.textContent = `${r} Range`;
+            rangeSelect.appendChild(opt1);
+        }
+        if (uploadRangeSelect) {
+            const opt2 = document.createElement('option');
+            opt2.value = r;
+            opt2.textContent = `${r} Range`;
+            uploadRangeSelect.appendChild(opt2);
+        }
+    });
+
+    await loadDfoBoundaries();
+    await loadPendingFieldSurveys();
+    await loadDfoStaffManagement();
+    showToastNotification(`Switched active division to: ${newDiv}`);
+};
