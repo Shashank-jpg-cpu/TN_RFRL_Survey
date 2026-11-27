@@ -1,0 +1,22 @@
+{
+  "name": "RF/RL Boundary Survey & Revision Platform",
+  "short_name": "Forest Survey",
+  "description": "Tamil Nadu Forest Department - RF/RL Ground GPS Vertex Revision & Survey Portal",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#121e28",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

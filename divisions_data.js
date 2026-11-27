@@ -1,0 +1,320 @@
+// Tamil Nadu Forest Department - Master Divisions & Ranges Registry
+window.TN_DIVISIONS_DATA = {
+  "ARIYALUR": [
+    "ARIYALUR",
+    "UDAYARPALAYAM"
+  ],
+  "ATTUR": [
+    "ATTUR",
+    "GANGAVALLI",
+    "KALRAYAN",
+    "THAMMAMPATTI",
+    "THUMBAL"
+  ],
+  "CHENGALPATTU": [
+    "CHENGALPATTU",
+    "MADURANTHAGAM",
+    "SRIPERUMPUDUR",
+    "THIRUPORUR"
+  ],
+  "CHENNAI": [
+    "HEAD QUARTER",
+    "TAMBARAM"
+  ],
+  "COIMBATORE": [
+    "BOLAMPATTY",
+    "COIMBATORE",
+    "KARAMADAI",
+    "MADUKKARAI",
+    "METTUPALAYAM",
+    "PERIYANAICKENPALAYAM",
+    "SIRUMUGAI"
+  ],
+  "CUDDALORE": [
+    "CHIDAMBARAM",
+    "CUDDALORE",
+    "PITCHAVARAM",
+    "VRIDDHACHALAM"
+  ],
+  "DHARMAPURI": [
+    "DHARMAPURI",
+    "HARUR",
+    "HOGENAKKAL",
+    "KOTTAPATTY",
+    "MORAPPUR",
+    "PALAKKODU",
+    "PENNAGARAM",
+    "THEERTHAMALAI"
+  ],
+  "DINDIGUL": [
+    "ALAGARKOIL",
+    "AYYALUR",
+    "KANNIVADI",
+    "NATHAM",
+    "ODDANCHATRAM",
+    "SIRUMALAI",
+    "VATTALAKUNDU"
+  ],
+  "ERODE": [
+    "ANDHIYUR",
+    "BARGUR",
+    "CHENNAMPATTY",
+    "ERODE"
+  ],
+  "GUDALUR": [
+    "BITHERKADU",
+    "CHERAMBADY",
+    "GUDALUR",
+    "NADUGANI",
+    "O VALLEY",
+    "PANDALUR"
+  ],
+  "HOSUR": [
+    "ANCHETTY",
+    "DENKANIKOTTAI",
+    "HOSUR",
+    "JAWALAGIRI",
+    "KRISHNAGIRI",
+    "RAYAKOTTAI",
+    "SOOLAGIRI",
+    "URIGAM",
+    "UTHANGARAI"
+  ],
+  "KANYAKUMARI": [
+    "AZHAGIAPANDIPURAM",
+    "BOOTHAPANDY",
+    "KALIYAL",
+    "KULASEKARAM",
+    "VELIMALAI"
+  ],
+  "KARUR": [
+    "KARUR"
+  ],
+  "KODAIKANAL": [
+    "BERIJAM",
+    "DEVADANAPPATTI",
+    "KODAIKANAL",
+    "MANNAVANUR",
+    "PALANI",
+    "PERUMPALLAM",
+    "POOMBARAI"
+  ],
+  "MADURAI": [
+    "MADURAI",
+    "SHOLAVANDAN",
+    "USILAMPATTY"
+  ],
+  "NAMAKKAL": [
+    "KOLLIMALAI",
+    "MULLUKURICHI",
+    "NAMAKKAL",
+    "RASIPURAM"
+  ],
+  "NILGIRIS": [
+    "COONOOR",
+    "GOVERNOR SHOLA",
+    "KATTABETTU",
+    "KILKOTAGIRI",
+    "KILKOTHAGIRI",
+    "KORAKUNDAH",
+    "KOTHAGIRI",
+    "KUNDAH",
+    "NADUVATTAM",
+    "PARSONS VALLEY",
+    "PYKARA",
+    "UDHAGAI NORTH",
+    "UDHAGAI SOUTH"
+  ],
+  "PERAMBALUR": [
+    "PERAMBALUR",
+    "VEPPANTHATTAI"
+  ],
+  "PUDUKKOTTAI": [
+    "ARANTANGI",
+    "KEERANUR",
+    "PONNAMARAVATHI",
+    "PUDUKKOTTAI",
+    "TIRUMAYAM"
+  ],
+  "RAMANATHAPURAM": [
+    "RAMANATHAPURAM",
+    "SAYALKUDI"
+  ],
+  "SALEM": [
+    "DANISHPET",
+    "METTUR",
+    "SHERVAROYS NORTH",
+    "SHERVAROYS SOUTH",
+    "VALAPADI",
+    "YERCAUD"
+  ],
+  "SIVAGANGAI": [
+    "SIVAGANGAI",
+    "TIRUPPATTUR(S)"
+  ],
+  "THANJAVUR": [
+    "KUMBAKONAM",
+    "PATTUKOTTAI",
+    "THANJAVUR"
+  ],
+  "THENI": [
+    "ANDIPATTY",
+    "BODI",
+    "CUMBUM WEST",
+    "PERIYAKULAM",
+    "THENI",
+    "UTHAMAPALAYAM"
+  ],
+  "THIRUVARUR": [
+    "MANNARGUDI",
+    "MUTHUPET",
+    "THIRUVARUR"
+  ],
+  "THOOTHUKUDI": [
+    "KOVILPATTI",
+    "SRIVAIKUNDAM",
+    "THOOTHUKUDI",
+    "TIRUCHENDUR",
+    "VILATHIKULAM"
+  ],
+  "TIRUCHIRAPPALLI": [
+    "MANAPPARAI",
+    "THURAIYUR",
+    "THUVARANKURICHI",
+    "TIRUCHIRAPPALLI"
+  ],
+  "TIRUNELVELI": [
+    "COURTALLAM",
+    "KADAYANALLUR",
+    "SANKARANKOIL",
+    "SIVAGIRI",
+    "TIRUNELVELI"
+  ],
+  "TIRUPPATTUR": [
+    "ALANGAYAM",
+    "AMBUR",
+    "SINGARAPETTAI",
+    "TIRUPPATTUR"
+  ],
+  "TIRUVALLUR": [
+    "GUMMUDIPOONDI",
+    "PALLIPATTU",
+    "RED HILLS",
+    "THIRUTTANI",
+    "THIRUVALLUR"
+  ],
+  "TIRUVANNAMALAI": [
+    "ARANI",
+    "CHENGAM",
+    "JAMNAMARATHUR",
+    "MELPET",
+    "NADANUR",
+    "POLUR",
+    "PUDUPALAYAM",
+    "SANTHAVASAL",
+    "SATHANUR",
+    "THANIPADI",
+    "TIRUVANNAMALAI"
+  ],
+  "UNKNOWNDN": [
+    "POLYGON_213"
+  ],
+  "VELLORE": [
+    "AMIRTHI",
+    "ARCOT",
+    "GUDIYATTAM",
+    "ODUGATHUR",
+    "PERANAMPATTU",
+    "VELLORE"
+  ],
+  "VILUPPURAM": [
+    "CHENJI",
+    "CHERAPATTU",
+    "GOMUKHI",
+    "INNADU",
+    "KALLAKURICHI",
+    "PALAPATTU",
+    "TINDIVANAM",
+    "ULUNDURPETTAI",
+    "VELLIMALAI",
+    "VILUPPURAM"
+  ],
+  "WL ATR POLLACHI": [
+    "MANAMBOLY",
+    "POLLACHI",
+    "ULANDY",
+    "VALPARAI"
+  ],
+  "WL ATR TIRUPPUR": [
+    "AMARAVATHI",
+    "KANGEYAM",
+    "KOLUMAM",
+    "TIRUPPUR",
+    "UDUMALAIPETTAI",
+    "VANDARAVU"
+  ],
+  "WL, CHENNAI": [
+    "NATIONAL PARK",
+    "SANCTUARY"
+  ],
+  "WL, KMTR AMBASAMUDRAM": [
+    "AMBASAMUDRAM",
+    "KADAYAM",
+    "MUNDANTHURAI",
+    "PAPANASAM"
+  ],
+  "WL, KMTR KALAKKADU": [
+    "KALAKKADU",
+    "THIRUKURUNGUDI",
+    "UPPER KODAYAR"
+  ],
+  "WL, MARINE NP": [
+    "KEELAKARAI",
+    "MANDAPAM",
+    "RAMANATHAPURAM WL"
+  ],
+  "WL, MEGAMALAI": [
+    "CHINNAMANUR",
+    "CUMBAM EAST",
+    "GANDAMANUR",
+    "GUDALUR(M)",
+    "MEGAMALAI",
+    "VARUSANADU"
+  ],
+  "WL, MTR MASINAGUDI": [
+    "MASINAGUDI",
+    "NILGIRIS EASTERN SLOPE",
+    "SEGUR",
+    "SINGARA"
+  ],
+  "WL, MTR UDHAGAI": [
+    "KARGUDI",
+    "MUDUMALAI",
+    "MUKURTHY",
+    "NELLAKOTTAI",
+    "THEPPAKADU"
+  ],
+  "WL, NAGAPATTINAM": [
+    "NAGAPATTINAM",
+    "SIRKALI",
+    "VEDARANYAM"
+  ],
+  "WL, SRIVILLIPUTHUR": [
+    "RAJAPALAYAM",
+    "SAPTUR",
+    "SIVAKASI",
+    "SRIVILLIPUTTUR",
+    "WATRAP"
+  ],
+  "WL, STR HASSANUR": [
+    "GERMALAM",
+    "HASSANUR",
+    "TALAVADI"
+  ],
+  "WL, STR SATHY": [
+    "BHAVANISAGAR",
+    "SATHYAMANGALAM",
+    "T N PALAYAM",
+    "TALAMALAI"
+  ]
+};
