@@ -1,24 +1,14 @@
-// api/sync.js - Persistent Master Cloud Sync & Single-Session Enforcement
-// Powered by persistent cloud storage for Desktop, Mobile Web, and Android App
+// api/sync.js - Universal Master Cloud Sync Engine for ALL 51 TN Forest Divisions
+// Persistent Cloud Database for Boundaries, Field Officer Accounts, RF Edits & Sessions
 
 const CLOUD_STORAGE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157';
 
 const DEFAULT_STORE = {
-    users: [
-        {
-            username: 'shashank',
-            password: 'shashank@123',
-            name: 'Shashank (Field Officer)',
-            role: 'FIELD_OFFICER',
-            division: 'Ranipet',
-            range: 'Ranipet Range',
-            created_at: new Date().toISOString(),
-            created_by: 'DFO (Ranipet)'
-        }
-    ],
+    users: [],
     polygons: [],
     pending_surveys: [],
     deleted_survey_ids: [],
+    deleted_polygon_ids: [],
     active_sessions: {},
     last_synced: new Date().toISOString()
 };
@@ -31,10 +21,11 @@ async function fetchMasterStore() {
             if (json && json.data) {
                 const d = json.data;
                 return {
-                    users: Array.isArray(d.users) ? d.users : DEFAULT_STORE.users,
+                    users: Array.isArray(d.users) ? d.users : [],
                     polygons: Array.isArray(d.polygons) ? d.polygons : [],
                     pending_surveys: Array.isArray(d.pending_surveys) ? d.pending_surveys : [],
                     deleted_survey_ids: Array.isArray(d.deleted_survey_ids) ? d.deleted_survey_ids : [],
+                    deleted_polygon_ids: Array.isArray(d.deleted_polygon_ids) ? d.deleted_polygon_ids : [],
                     active_sessions: (typeof d.active_sessions === 'object' && d.active_sessions !== null) ? d.active_sessions : {},
                     last_synced: d.last_synced || new Date().toISOString()
                 };
@@ -92,7 +83,7 @@ module.exports = async function handler(req, res) {
             const action = body.action || 'sync_data';
             const store = await fetchMasterStore();
             const now = Date.now();
-            const SESSION_TIMEOUT_MS = 120000; // 2 minutes active window
+            const SESSION_TIMEOUT_MS = 120000; // 2 minutes active session timeout
 
             // -------------------------------------------------------------
             // ACTION 1: ACQUIRE EXCLUSIVE SESSION (Single Login Enforcement)
@@ -133,7 +124,7 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // ACTION 2: HEARTBEAT (Keep Alive & Remote Device Verification)
+            // ACTION 2: HEARTBEAT
             // -------------------------------------------------------------
             if (action === 'heartbeat') {
                 const { sessionKey, deviceId, deviceType } = body;
@@ -153,7 +144,6 @@ module.exports = async function handler(req, res) {
                     await putMasterStore(store);
                     return res.status(200).json({ success: true });
                 } else if (now - (currentSession.lastHeartbeat || 0) < SESSION_TIMEOUT_MS) {
-                    // Another device is actively using this account!
                     return res.status(200).json({
                         success: false,
                         code: 'SESSION_TERMINATED',
@@ -161,7 +151,6 @@ module.exports = async function handler(req, res) {
                         message: `Logged out: Session was opened on ${currentSession.deviceType || 'another device'}.`
                     });
                 } else {
-                    // Prior session has timed out; take over cleanly
                     store.active_sessions[sessionKey] = {
                         deviceId: deviceId,
                         deviceType: deviceType || 'Device',
@@ -174,7 +163,7 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // ACTION 3: RELEASE SESSION (Instant Logout Unlocking)
+            // ACTION 3: RELEASE SESSION (Instant Logout)
             // -------------------------------------------------------------
             if (action === 'release_session') {
                 const { sessionKey, deviceId } = body;
@@ -188,31 +177,53 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // ACTION 4: FULL BI-DIRECTIONAL DATA MERGE
+            // ACTION 4: FULL BI-DIRECTIONAL DATA MERGE FOR ALL 51 DIVISIONS
             // -------------------------------------------------------------
-            // Merge deleted survey IDs
+            // 1. Merge deleted survey IDs
             if (body.deleted_survey_ids && Array.isArray(body.deleted_survey_ids)) {
                 const delSet = new Set(store.deleted_survey_ids || []);
                 body.deleted_survey_ids.forEach(id => delSet.add(id));
                 store.deleted_survey_ids = Array.from(delSet);
             }
 
-            // Merge pending surveys (filtering out deleted ones)
-            const delSet = new Set(store.deleted_survey_ids || []);
+            // 2. Merge deleted polygon IDs
+            if (body.deleted_polygon_ids && Array.isArray(body.deleted_polygon_ids)) {
+                const delPolySet = new Set(store.deleted_polygon_ids || []);
+                body.deleted_polygon_ids.forEach(id => delPolySet.add(id));
+                store.deleted_polygon_ids = Array.from(delPolySet);
+            }
+
+            // 3. Merge pending surveys (filtering out deleted ones)
+            const delSurvSet = new Set(store.deleted_survey_ids || []);
             const survMap = new Map();
             (store.pending_surveys || []).forEach(s => {
-                if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s);
+                if (s && s.id && !delSurvSet.has(s.id)) survMap.set(s.id, s);
             });
             if (body.pending_surveys && Array.isArray(body.pending_surveys)) {
                 body.pending_surveys.forEach(s => {
-                    if (s && s.id && !delSet.has(s.id)) {
+                    if (s && s.id && !delSurvSet.has(s.id)) {
                         survMap.set(s.id, s);
                     }
                 });
             }
             store.pending_surveys = Array.from(survMap.values());
 
-            // Merge users uniquely by username
+            // 4. Merge polygons for ALL divisions (filtering out deleted ones)
+            const delPolySet = new Set(store.deleted_polygon_ids || []);
+            const polyMap = new Map();
+            (store.polygons || []).forEach(p => {
+                if (p && p.id && !delPolySet.has(p.id)) polyMap.set(p.id, p);
+            });
+            if (body.polygons && Array.isArray(body.polygons)) {
+                body.polygons.forEach(p => {
+                    if (p && p.id && !delPolySet.has(p.id)) {
+                        polyMap.set(p.id, p);
+                    }
+                });
+            }
+            store.polygons = Array.from(polyMap.values());
+
+            // 5. Merge users for ALL divisions & ranges uniquely by username
             const userMap = new Map();
             (store.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
             if (body.users && Array.isArray(body.users)) {
@@ -224,23 +235,11 @@ module.exports = async function handler(req, res) {
             }
             store.users = Array.from(userMap.values());
 
-            // Merge polygons uniquely by ID
-            const polyMap = new Map();
-            (store.polygons || []).forEach(p => polyMap.set(p.id, p));
-            if (body.polygons && Array.isArray(body.polygons)) {
-                body.polygons.forEach(p => {
-                    if (p && p.id) {
-                        polyMap.set(p.id, p);
-                    }
-                });
-            }
-            store.polygons = Array.from(polyMap.values());
-
             await putMasterStore(store);
 
             return res.status(200).json({
                 success: true,
-                message: 'Cloud sync completed successfully',
+                message: 'Universal cloud sync completed successfully',
                 data: store
             });
         } catch (err) {

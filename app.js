@@ -1,3 +1,10 @@
+// -------------------------------------------------------------------------
+// 10-DECIMAL PRECISION COORDINATE FORMATTER (High-Accuracy Cadastral GIS)
+// -------------------------------------------------------------------------
+function format10Dec(val) {
+    if (val === null || val === undefined || isNaN(val)) return '0.0000000000';
+    return Number(val).toFixed(10);
+}
 /**
  * app.js - Full Division/Range Scoped Portal, Multiple Satellite Maps, and Ground Survey Engine
  * Tamil Nadu Forest Department
@@ -360,17 +367,24 @@ async function checkAuthSession() {
     }
 }
 
-function handleLogout() {
-    if (confirm('Are you sure you want to log out of the portal?')) {
-        window.surveyDB.logout();
-        checkAuthSession();
+let isLoggingOut = false;
+async function handleLogout() {
+    if (isLoggingOut) return;
+    if (!confirm('Are you sure you want to log out of the portal?')) return;
+    isLoggingOut = true;
+    try {
+        if (window.surveyDB && window.surveyDB.logout) {
+            await window.surveyDB.logout();
+        }
+        await checkAuthSession();
+    } catch (e) {
+        console.warn('Logout note:', e);
+        window.location.reload();
+    } finally {
+        setTimeout(() => { isLoggingOut = false; }, 1200);
     }
 }
-
-const logoutBtnHeader = document.getElementById('logoutBtn');
-if (logoutBtnHeader) {
-    logoutBtnHeader.addEventListener('click', handleLogout);
-}
+window.handleLogout = handleLogout;
 
 // -------------------------------------------------------------------------
 // PWA INSTALLATION PROMPT HANDLER (One-Tap Install for Android & Mobile)
@@ -462,6 +476,9 @@ async function setupDfoPortal() {
 }
 
 async function loadDfoBoundaries() {
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
     const all = await window.surveyDB.getAll('polygons');
     // Filter strictly to current DFO division
     const divisionPolys = all.filter(p => p.division.toLowerCase() === currentDivision.toLowerCase());
@@ -642,8 +659,8 @@ function selectActiveVertex(idx) {
     // Populate Editable GPS Coordinate Inputs
     const latInp = document.getElementById('editVertexLatInput');
     const lonInp = document.getElementById('editVertexLonInput');
-    if (latInp) latInp.value = c[1].toFixed(6);
-    if (lonInp) lonInp.value = c[0].toFixed(6);
+    if (latInp) latInp.value = format10Dec(c[1]);
+    if (lonInp) lonInp.value = format10Dec(c[0]);
 
     const statusEl = document.getElementById('selectedVertexFlagStatus');
     const flagBtn = document.getElementById('btnToggleFlag');
@@ -685,7 +702,7 @@ async function saveTypedVertexCoordinates() {
     renderActiveBoundary();
     selectActiveVertex(selectedVertexIndex);
     map.panTo([lat, lon]);
-    alert(`Point #${selectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${lat.toFixed(6)}\nLongitude: ${lon.toFixed(6)}`);
+    alert(`Point #${selectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${format10Dec(lat)}\nLongitude: ${format10Dec(lon)}`);
 }
 
 // Snap active vertex to officer's standing GPS location
@@ -777,6 +794,9 @@ async function deleteCurrentBoundary() {
     if (!currentBoundaryData) return;
     if (confirm(`Are you sure you want to delete "${currentBoundaryData.name}" from ${currentDivision} database?`)) {
         await window.surveyDB.delete('polygons', currentBoundaryData.id);
+        if (navigator.onLine && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud({ deletedPolygonId: currentBoundaryData.id }).catch(() => {});
+        }
         alert('Boundary deleted from database.');
         await loadDfoBoundaries();
     }
@@ -829,6 +849,9 @@ document.getElementById('kmlFileInput').addEventListener('change', async (e) => 
     };
 
     await window.surveyDB.put('polygons', newPoly);
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
     alert(`Successfully saved "${bName}" under ${targetRange} Range to ${currentDivision} database!`);
 
     document.getElementById('uploadBoundaryName').value = '';
@@ -878,8 +901,8 @@ async function loadPendingFieldSurveys() {
         item.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div>
-                    <b style="color:#38bdf8;">${s.name}</b><br>
-                    <small style="color:#94a3b8;">${s.range} Range | ${s.coordinates.length} cairns | Area: <b style="color:#fbbf24;">${s.area_ha} Ha</b></small>
+                    ${s.is_revision ? '<span class="badge-revision">REVISION</span>' : ''}<b style="color:#38bdf8;">${s.name}</b><br>
+                    <small style="color:#94a3b8;">${s.range} Range | ${s.coordinates.length} cairns | Area: <b style="color:#fbbf24;">${s.area_ha} Ha</b> ${s.submitted_by ? '&bull; By ' + s.submitted_by : ''}</small>
                 </div>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px;">
@@ -909,14 +932,28 @@ async function previewFieldSurvey(surveyId) {
     if (!previewMarkersGroup) previewMarkersGroup = L.layerGroup().addTo(map);
     previewMarkersGroup.clearLayers();
 
+    // If revision, show original boundary in dashed cyan
+    if (s.is_revision && s.targetPolygonId) {
+        const orig = await window.surveyDB.get('polygons', s.targetPolygonId);
+        if (orig && orig.coordinates) {
+            const origLatLngs = orig.coordinates.map(c => [c[1], c[0]]);
+            L.polygon(origLatLngs, {
+                color: '#06b6d4',
+                weight: 2,
+                dashArray: '6, 6',
+                fill: false
+            }).addTo(previewMarkersGroup);
+        }
+    }
+
     const latlngs = s.coordinates.map(c => [c[1], c[0]]);
 
-    // Bright cyan/gold dashed preview polygon
+    // Bright amber revised polygon
     previewSurveyLayer = L.polygon(latlngs, {
-        color: '#fbbf24',
+        color: '#f59e0b',
         weight: 3,
-        dashArray: '8, 6',
-        fillColor: '#38bdf8',
+        dashArray: '8, 5',
+        fillColor: '#fbbf24',
         fillOpacity: 0.25
     }).addTo(map);
 
@@ -929,31 +966,49 @@ async function previewFieldSurvey(surveyId) {
             iconSize: [26, 26],
             iconAnchor: [13, 13]
         });
-        L.marker([c[1], c[0]], { icon: icon }).addTo(previewMarkersGroup);
+        const marker = L.marker([c[1], c[0]], { icon: icon }).addTo(previewMarkersGroup);
+        marker.bindPopup(`<b>Cairn #${idx + 1} (${s.is_revision ? 'Revised' : 'Proposed'})</b><br>Lat: ${format10Dec(c[1])}<br>Lon: ${format10Dec(c[0])}`);
     });
 
-    document.getElementById('activeMapInfo').textContent = `PREVIEW: ${s.name} (${s.range} Range) — ${s.area_ha} Ha`;
-    alert(`Showing preview of "${s.name}" on satellite map!\nClick "Accept" in the inbox to add it to the official database.`);
+    document.getElementById('activeMapInfo').textContent = `${s.is_revision ? 'REVISION PREVIEW' : 'PREVIEW'}: ${s.name} (${s.range} Range) — ${s.area_ha} Ha`;
+    alert(`Showing preview of ${s.is_revision ? 'edited boundary revision' : 'survey'} "${s.name}" on map!\nClick "Accept" to overwrite official boundary or "Reject" to discard.`);
 }
 
 async function acceptFieldSurvey(surveyId) {
     const survey = await window.surveyDB.get('pending_surveys', surveyId);
     if (!survey) return;
 
-    // Load into official database
-    const officialPoly = {
-        id: `RF_${survey.division.replace(/\s+/g, '_')}_${Date.now()}`,
-        name: survey.name,
-        division: survey.division,
-        range: survey.range,
-        type: 'RF',
-        status: 'OFFICIAL',
-        coordinates: survey.coordinates,
-        flaggedVertices: [],
-        created_at: new Date().toISOString()
-    };
+    let targetId = survey.targetPolygonId;
+    let savedPoly = null;
 
-    await window.surveyDB.put('polygons', officialPoly);
+    if (survey.is_revision && targetId) {
+        // OVERWRITE existing official boundary in database!
+        const existing = await window.surveyDB.get('polygons', targetId);
+        if (existing) {
+            existing.coordinates = survey.coordinates;
+            existing.updated_at = new Date().toISOString();
+            existing.status = 'OFFICIAL';
+            savedPoly = existing;
+            await window.surveyDB.put('polygons', existing);
+        }
+    }
+
+    if (!savedPoly) {
+        // Create new official polygon
+        savedPoly = {
+            id: `RF_${survey.division.replace(/\s+/g, '_')}_${Date.now()}`,
+            name: survey.name,
+            division: survey.division,
+            range: survey.range,
+            type: 'RF',
+            status: 'OFFICIAL',
+            coordinates: survey.coordinates,
+            flaggedVertices: [],
+            created_at: new Date().toISOString()
+        };
+        await window.surveyDB.put('polygons', savedPoly);
+    }
+
     await window.surveyDB.delete('pending_surveys', surveyId);
     if (navigator.onLine && window.surveyDB.syncCloud) {
         await window.surveyDB.syncCloud({ deletedSurveyId: surveyId }).catch(() => {});
@@ -962,14 +1017,13 @@ async function acceptFieldSurvey(surveyId) {
     if (previewSurveyLayer) map.removeLayer(previewSurveyLayer);
     if (previewMarkersGroup) previewMarkersGroup.clearLayers();
 
-    alert(`Survey "${survey.name}" accepted and loaded into ${survey.division} official database!`);
+    alert(`Boundary "${survey.name}" ${survey.is_revision ? 'revision accepted & overwritten' : 'accepted & loaded'} in ${survey.division} official database!`);
     await loadPendingFieldSurveys();
     await loadDfoBoundaries();
 
-    // Select the accepted boundary
     const bSelect = document.getElementById('dfoBoundarySelect');
-    if (bSelect) {
-        bSelect.value = officialPoly.id;
+    if (bSelect && savedPoly) {
+        bSelect.value = savedPoly.id;
         loadDfoActiveBoundary();
     }
 }
@@ -1034,9 +1088,9 @@ async function updateStaffRangeQuota() {
     if (!targetRange) return;
 
     const count = await window.surveyDB.countFieldStaffByRange(currentDivision, targetRange);
-    quotaBadge.textContent = `${count} / 5 Active`;
+    quotaBadge.textContent = `${count} / 10 Active`;
 
-    if (count >= 5) {
+    if (count >= 10) {
         quotaBadge.classList.add('full');
         if (createBtn) createBtn.disabled = true;
     } else {
@@ -1150,7 +1204,295 @@ async function handleRevokeFieldStaff(username) {
 // -------------------------------------------------------------------------
 // 4. FIELD OFFICER PORTAL: CREATE NEW POLYGON (GPS & MANUAL MAP CLICK)
 // -------------------------------------------------------------------------
-function setupFieldPortal() {
+
+// =========================================================================
+// FIELD OFFICER ASSIGNED RF BOUNDARY REVISION & EDITING ENGINE
+// =========================================================================
+let fieldActiveBoundaryData = null;
+let fieldSelectedVertexIndex = 0;
+let fieldOperationMode = 'EDIT_RF';
+
+window.switchFieldOperationMode = function(mode) {
+    fieldOperationMode = mode;
+    const tabEdit = document.getElementById('tabFieldEditRf');
+    const tabNew = document.getElementById('tabFieldNewRf');
+    const secEdit = document.getElementById('fieldEditRfSection');
+    const secNew = document.getElementById('fieldNewSurveySection');
+
+    if (mode === 'EDIT_RF') {
+        if (tabEdit) tabEdit.classList.add('active');
+        if (tabNew) tabNew.classList.remove('active');
+        if (secEdit) secEdit.style.display = 'block';
+        if (secNew) secNew.style.display = 'none';
+        loadFieldAssignedBoundaries();
+    } else {
+        if (tabEdit) tabEdit.classList.remove('active');
+        if (tabNew) tabNew.classList.add('active');
+        if (secEdit) secEdit.style.display = 'none';
+        if (secNew) secNew.style.display = 'block';
+        if (activePolygonLayer) map.removeLayer(activePolygonLayer);
+        vertexMarkersGroup.clearLayers();
+        renderNewSurveyProgress();
+    }
+};
+
+window.loadFieldAssignedBoundaries = async function() {
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
+
+    const all = await window.surveyDB.getAll('polygons');
+    // Strictly filter to current field officer's division and range!
+    const rangePolys = all.filter(p => 
+        p.division && p.range &&
+        p.division.toLowerCase() === currentDivision.toLowerCase() &&
+        p.range.toLowerCase() === currentRange.toLowerCase()
+    );
+
+    const selectEl = document.getElementById('fieldAssignedRfSelect');
+    if (!selectEl) return;
+    selectEl.innerHTML = '';
+
+    if (rangePolys.length === 0) {
+        selectEl.innerHTML = `<option value="">No RFs assigned to ${currentRange} yet</option>`;
+        const det = document.getElementById('fieldRfDetailsCard');
+        const vcard = document.getElementById('fieldActiveVertexCard');
+        const sub = document.getElementById('fieldSubmitRevisionCard');
+        if (det) det.style.display = 'none';
+        if (vcard) vcard.style.display = 'none';
+        if (sub) sub.style.display = 'none';
+        if (activePolygonLayer) map.removeLayer(activePolygonLayer);
+        vertexMarkersGroup.clearLayers();
+        return;
+    }
+
+    rangePolys.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = `${p.name} (${p.coordinates.length} cairns)`;
+        selectEl.appendChild(opt);
+    });
+
+    selectEl.value = rangePolys[0].id;
+    await loadFieldBoundaryForEditing();
+};
+
+window.loadFieldBoundaryForEditing = async function() {
+    const selectEl = document.getElementById('fieldAssignedRfSelect');
+    if (!selectEl || !selectEl.value) return;
+
+    const poly = await window.surveyDB.get('polygons', selectEl.value);
+    if (!poly) return;
+
+    fieldActiveBoundaryData = JSON.parse(JSON.stringify(poly));
+    fieldSelectedVertexIndex = 0;
+
+    const det = document.getElementById('fieldRfDetailsCard');
+    const sub = document.getElementById('fieldSubmitRevisionCard');
+    if (det) det.style.display = 'block';
+    if (sub) sub.style.display = 'block';
+    document.getElementById('fieldRfName').textContent = poly.name;
+    document.getElementById('fieldRfRange').textContent = `${poly.range} Range`;
+    document.getElementById('fieldRfCairns').textContent = `${poly.coordinates.length} cairns`;
+
+    // Calculate area
+    const closed = [...poly.coordinates, poly.coordinates[0]];
+    const turfPoly = turf.polygon([closed]);
+    const areaHa = (turf.area(turfPoly) / 10000).toFixed(2);
+    document.getElementById('fieldRfArea').textContent = `${areaHa} Ha`;
+
+    renderFieldActiveBoundary();
+    selectFieldVertex(0);
+};
+
+window.renderFieldActiveBoundary = function() {
+    if (!fieldActiveBoundaryData || !fieldActiveBoundaryData.coordinates) return;
+
+    if (activePolygonLayer) map.removeLayer(activePolygonLayer);
+    vertexMarkersGroup.clearLayers();
+
+    const latlngs = fieldActiveBoundaryData.coordinates.map(c => [c[1], c[0]]);
+
+    // Green editable boundary for field officer
+    activePolygonLayer = L.polygon(latlngs, {
+        color: '#059669',
+        weight: 3,
+        fillColor: '#10b981',
+        fillOpacity: 0.25
+    }).addTo(map);
+
+    map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+
+    // Render Draggable, Clickable Cairn Markers
+    fieldActiveBoundaryData.coordinates.forEach((c, idx) => {
+        const isSelected = (idx === fieldSelectedVertexIndex);
+        const icon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div class="vertex-marker-icon ${isSelected ? 'selected' : ''}" style="background:${isSelected ? '#0284c7' : '#059669'}; width:28px; height:28px; border:2px solid #ffffff;">${idx + 1}</div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+
+        const marker = L.marker([c[1], c[0]], { icon: icon, draggable: true }).addTo(vertexMarkersGroup);
+
+        marker.on('click', () => {
+            selectFieldVertex(idx);
+        });
+
+        marker.on('drag', (e) => {
+            const pos = e.target.getLatLng();
+            fieldActiveBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
+            activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+
+            if (idx === fieldSelectedVertexIndex) {
+                document.getElementById('fieldVertexLatInput').value = pos.lat.toFixed(10);
+                document.getElementById('fieldVertexLonInput').value = pos.lng.toFixed(10);
+            }
+
+            const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
+            const ha = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+            document.getElementById('fieldRfArea').textContent = `${ha} Ha`;
+        });
+
+        marker.on('dragend', () => {
+            renderFieldActiveBoundary();
+            selectFieldVertex(idx);
+        });
+    });
+
+    // Click line to insert cairn
+    activePolygonLayer.on('click', (e) => {
+        const clickPt = turf.point([e.latlng.lng, e.latlng.lat]);
+        const coords = fieldActiveBoundaryData.coordinates;
+        let bestIndex = 0;
+        let minDistance = Infinity;
+
+        for (let i = 0; i < coords.length; i++) {
+            const nextIdx = (i + 1) % coords.length;
+            const line = turf.lineString([coords[i], coords[nextIdx]]);
+            const d = turf.pointToLineDistance(clickPt, line);
+            if (d < minDistance) {
+                minDistance = d;
+                bestIndex = nextIdx;
+            }
+        }
+
+        const newCoord = [Number(e.latlng.lng.toFixed(10)), Number(e.latlng.lat.toFixed(10))];
+        coords.splice(bestIndex, 0, newCoord);
+        renderFieldActiveBoundary();
+        selectFieldVertex(bestIndex);
+        alert(`Inserted new boundary cairn #${bestIndex + 1}! You can drag it or type exact 10-decimal coordinates.`);
+    });
+};
+
+window.selectFieldVertex = function(idx) {
+    if (!fieldActiveBoundaryData || !fieldActiveBoundaryData.coordinates[idx]) return;
+    fieldSelectedVertexIndex = idx;
+    const c = fieldActiveBoundaryData.coordinates[idx];
+
+    document.getElementById('fieldActiveVertexCard').style.display = 'block';
+    document.getElementById('fieldActivePointNum').textContent = `Point #${idx + 1}`;
+    document.getElementById('fieldVertexLatInput').value = Number(c[1]).toFixed(10);
+    document.getElementById('fieldVertexLonInput').value = Number(c[0]).toFixed(10);
+};
+
+window.saveFieldVertexCoords = function() {
+    if (!fieldActiveBoundaryData) return;
+    const latInp = document.getElementById('fieldVertexLatInput');
+    const lonInp = document.getElementById('fieldVertexLonInput');
+    const lat = parseFloat(latInp.value);
+    const lon = parseFloat(lonInp.value);
+
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        alert('Please enter valid GPS coordinates (Latitude: -90 to 90, Longitude: -180 to 180).');
+        return;
+    }
+
+    fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+    renderFieldActiveBoundary();
+    selectFieldVertex(fieldSelectedVertexIndex);
+    alert(`Cairn #${fieldSelectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+};
+
+window.snapFieldVertexToStandingGps = function() {
+    if (!fieldActiveBoundaryData) return;
+
+    if (liveGpsPosition && liveGpsPosition.latitude) {
+        const lat = liveGpsPosition.latitude;
+        const lon = liveGpsPosition.longitude;
+        fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+        renderFieldActiveBoundary();
+        selectFieldVertex(fieldSelectedVertexIndex);
+        alert(`Point #${fieldSelectedVertexIndex + 1} snapped to standing GPS:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+        return;
+    }
+
+    if (!('geolocation' in navigator)) {
+        alert('Geolocation is not supported by your browser.');
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+            renderFieldActiveBoundary();
+            selectFieldVertex(fieldSelectedVertexIndex);
+            alert(`Point #${fieldSelectedVertexIndex + 1} snapped to live GPS:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+        },
+        (err) => alert(`GPS Error: ${err.message}`),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+};
+
+window.deleteFieldSelectedVertex = function() {
+    if (!fieldActiveBoundaryData) return;
+    if (fieldActiveBoundaryData.coordinates.length <= 3) {
+        alert('A valid boundary polygon requires at least 3 points! Cannot delete further.');
+        return;
+    }
+
+    if (confirm(`Delete Point #${fieldSelectedVertexIndex + 1} from "${fieldActiveBoundaryData.name}"?`)) {
+        fieldActiveBoundaryData.coordinates.splice(fieldSelectedVertexIndex, 1);
+        fieldSelectedVertexIndex = Math.max(0, fieldSelectedVertexIndex - 1);
+        renderFieldActiveBoundary();
+        selectFieldVertex(fieldSelectedVertexIndex);
+    }
+};
+
+window.submitFieldRfRevision = async function() {
+    if (!fieldActiveBoundaryData || fieldActiveBoundaryData.coordinates.length < 3) {
+        alert('A valid polygon requires at least 3 points.');
+        return;
+    }
+
+    const user = window.surveyDB.getCurrentUser();
+    const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
+    const areaHa = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+
+    const revision = {
+        id: `REV_${fieldActiveBoundaryData.id}_${Date.now()}`,
+        targetPolygonId: fieldActiveBoundaryData.id,
+        name: fieldActiveBoundaryData.name,
+        division: currentDivision,
+        range: currentRange,
+        is_revision: true,
+        coordinates: fieldActiveBoundaryData.coordinates.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]),
+        area_ha: areaHa,
+        submitted_by: user ? (user.name || user.username) : 'Field Officer',
+        submitted_at: new Date().toISOString()
+    };
+
+    await window.surveyDB.put('pending_surveys', revision);
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
+
+    alert(`Edited RF Boundary "${fieldActiveBoundaryData.name}" (${revision.coordinates.length} cairns, ${areaHa} Ha) submitted to ${currentDivision} DFO for verification!`);
+};
+
+async function setupFieldPortal() {
     document.getElementById('dfoPanel').style.display = 'none';
     document.getElementById('fieldPanel').style.display = 'block';
 
@@ -1163,7 +1505,8 @@ function setupFieldPortal() {
     if (previewSurveyLayer) map.removeLayer(previewSurveyLayer);
     if (previewMarkersGroup) previewMarkersGroup.clearLayers();
 
-    renderNewSurveyProgress();
+    // Default to Edit Assigned RF Boundary Mode
+    switchFieldOperationMode('EDIT_RF');
 }
 
 // Switch between Outdoor GPS and Indoor Manual Testing
@@ -1664,7 +2007,7 @@ function exportCurrentKml() {
     const name = currentBoundaryData.name.replace(/\s+/g, '_');
     const coords = currentBoundaryData.coordinates;
     const closed = [...coords, coords[0]];
-    const coordStr = closed.map(c => `${c[0]},${c[1]},0`).join(' ');
+    const coordStr = closed.map(c => `${format10Dec(c[0])},${format10Dec(c[1])},0`).join(' ');
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
@@ -1692,7 +2035,7 @@ function exportSurveyCsv() {
     let csv = 'Cairn_Number,Longitude,Latitude,Elevation_m,Verification_Status\n';
     coords.forEach((c, idx) => {
         const isFlagged = currentBoundaryData.flaggedVertices && currentBoundaryData.flaggedVertices.includes(idx);
-        csv += `${idx + 1},${c[0]},${c[1]},0,${isFlagged ? 'DISPUTE_FIELD_VERIFICATION_NEEDED' : 'VERIFIED'}\n`;
+        csv += `${idx + 1},${format10Dec(c[0])},${format10Dec(c[1])},0,${isFlagged ? 'DISPUTE_FIELD_VERIFICATION_NEEDED' : 'VERIFIED'}\n`;
     });
     downloadFile(csv, `${currentBoundaryData.name.replace(/\s+/g, '_')}_Cairn_Coordinates.csv`, 'text/csv');
 }
@@ -1704,7 +2047,7 @@ function exportFieldSurveyKml() {
     }
     const coords = newSurveyPoints.map(p => [p.lon, p.lat]);
     const closed = [...coords, coords[0]];
-    const coordStr = closed.map(c => `${c[0]},${c[1]},0`).join(' ');
+    const coordStr = closed.map(c => `${format10Dec(c[0])},${format10Dec(c[1])},0`).join(' ');
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">

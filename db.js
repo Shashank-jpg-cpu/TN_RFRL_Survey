@@ -427,6 +427,13 @@ class SurveyDB {
                 }
             }
 
+            // 1b. Remove deleted polygons locally
+            if (cloudData.deleted_polygon_ids && Array.isArray(cloudData.deleted_polygon_ids)) {
+                for (const delPolyId of cloudData.deleted_polygon_ids) {
+                    await this.delete('polygons', delPolyId);
+                }
+            }
+
             // 2. Sync Users
             if (cloudData.users && Array.isArray(cloudData.users)) {
                 for (const u of cloudData.users) {
@@ -502,7 +509,8 @@ class SurveyDB {
             users: users,
             polygons: polygons,
             pending_surveys: pending_surveys,
-            deleted_survey_ids: options.deletedSurveyId ? [options.deletedSurveyId] : []
+            deleted_survey_ids: options.deletedSurveyId ? [options.deletedSurveyId] : [],
+            deleted_polygon_ids: options.deletedPolygonId ? [options.deletedPolygonId] : []
         };
 
         // Try primary /api/sync
@@ -570,8 +578,8 @@ class SurveyDB {
     async createFieldStaff(staffData) {
         // Enforce 5 people limit per range
         const currentCount = await this.countFieldStaffByRange(staffData.division, staffData.range);
-        if (currentCount >= 5) {
-            throw new Error(`Range Quota Exceeded: A maximum of 5 field officer logins are allowed for "${staffData.range} Range".`);
+        if (currentCount >= 10) {
+            throw new Error(`Range Quota Exceeded: A maximum of 10 field officer logins are allowed for "${staffData.range} Range".`);
         }
 
         // Check if username already taken
@@ -647,9 +655,9 @@ class SurveyDB {
         }
 
         if (role === 'FIELD_OFFICER') {
-            // First pull from cloud if online
+            // First sync cloud to ensure newly created officers from other devices are present
             if (navigator.onLine) {
-                try { await this.pullFromCloud(); } catch(e) {}
+                try { await this.syncCloud(); } catch(e) {}
             }
 
             const allUsers = await this.getAll('users');

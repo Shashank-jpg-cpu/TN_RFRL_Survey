@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tn-forest-survey-v6';
+const CACHE_NAME = 'tn-forest-survey-v7';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
