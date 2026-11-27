@@ -15,11 +15,30 @@ let currentRole = 'DFO'; // 'DFO' or 'FIELD_OFFICER'
 let currentDivision = 'Chennai Division';
 let currentRange = null;
 
-// Map layers
+// Map layers & marker instances (retained in memory for 60fps buttery smooth dragging)
 let activePolygonLayer = null;
 let vertexMarkersGroup = null;
 let currentBoundaryData = null;
 let selectedVertexIndex = null;
+let activeMarkerInstances = [];
+let fieldMarkerInstances = [];
+
+// Range normalizer (handles 'Ranipet' vs 'Ranipet Range' seamlessly)
+function normalizeRange(r) {
+    if (!r) return '';
+    return r.toString().toLowerCase().replace(/\s*range\s*$/i, '').trim();
+}
+
+// Debounced cloud sync to keep UI at 60fps without network lag
+let cloudSyncDebounceTimer = null;
+function scheduleCloudSync(delayMs = 1500) {
+    if (cloudSyncDebounceTimer) clearTimeout(cloudSyncDebounceTimer);
+    cloudSyncDebounceTimer = setTimeout(() => {
+        if (window.surveyDB && window.surveyDB.syncCloud && navigator.onLine) {
+            window.surveyDB.syncCloud().catch(() => {});
+        }
+    }, delayMs);
+}
 
 // Live GPS Tracking
 let liveGpsWatchId = null;
@@ -325,9 +344,8 @@ async function checkAuthSession() {
         } catch (e) {}
     }
 
-    // Session is valid for this device: start continuous heartbeat & continuous live cloud sync
+    // Session is valid for this device: start continuous heartbeat
     if (window.surveyDB.startHeartbeat) window.surveyDB.startHeartbeat(sessionKey);
-    if (window.surveyDB.startContinuousSync) window.surveyDB.startContinuousSync();
 
     if (loginScreen) loginScreen.style.display = 'none';
     if (appHeader) appHeader.style.display = 'flex';
@@ -394,47 +412,6 @@ async function handleLogout(e) {
 window.handleLogout = handleLogout;
 
 // -------------------------------------------------------------------------
-// CONTINUOUS LIVE CLOUD SYNC LISTENER (Real-Time Boundary & Map Updates)
-// -------------------------------------------------------------------------
-window.addEventListener('cloud-data-synced', async (e) => {
-    const user = window.surveyDB ? window.surveyDB.getCurrentUser() : null;
-    if (!user) return;
-
-    if (user.role === 'DFO') {
-        // Refresh pending field surveys on DFO screen
-        if (typeof loadPendingFieldSurveys === 'function') {
-            await loadPendingFieldSurveys();
-        }
-
-        // If a boundary is currently loaded on map, check if its coordinates updated in DB
-        if (currentBoundaryData && currentBoundaryData.id) {
-            const fresh = await window.surveyDB.get('polygons', currentBoundaryData.id);
-            if (fresh && JSON.stringify(fresh.coordinates) !== JSON.stringify(currentBoundaryData.coordinates)) {
-                console.log('Live cloud polygon update detected for active boundary:', fresh.name);
-                currentBoundaryData = fresh;
-                renderActiveBoundary(false); // LIVE UPDATE ON MAP WITH ZERO ZOOM RESET
-                if (selectedVertexIndex !== null) {
-                    selectActiveVertex(selectedVertexIndex);
-                }
-            }
-        }
-    } else if (user.role === 'FIELD_OFFICER') {
-        // If Field Officer has an active boundary loaded, check if it was updated by DFO
-        if (fieldActiveBoundaryData && fieldActiveBoundaryData.id) {
-            const fresh = await window.surveyDB.get('polygons', fieldActiveBoundaryData.id);
-            if (fresh && JSON.stringify(fresh.coordinates) !== JSON.stringify(fieldActiveBoundaryData.coordinates)) {
-                console.log('Live cloud polygon update detected for field boundary:', fresh.name);
-                fieldActiveBoundaryData = JSON.parse(JSON.stringify(fresh));
-                renderFieldActiveBoundary(false); // LIVE UPDATE ON MAP WITH ZERO ZOOM RESET
-                if (fieldSelectedVertexIndex !== null) {
-                    selectFieldVertex(fieldSelectedVertexIndex);
-                }
-            }
-        }
-    }
-});
-
-// -------------------------------------------------------------------------
 // PWA INSTALLATION PROMPT HANDLER (One-Tap Install for Android & Mobile)
 // -------------------------------------------------------------------------
 let deferredInstallPrompt = null;
@@ -484,17 +461,14 @@ function closeInstallGuideModal() {
 // 3. DFO PORTAL: MANAGE ONLY THIS DIVISION'S RANGES & KML BOUNDARIES
 // -------------------------------------------------------------------------
 async function setupDfoPortal() {
-    if (navigator.onLine && window.surveyDB.pullFromCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
+    // 1. Cleanly pull latest cloud database once upon login
+    if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
     document.getElementById('dfoPanel').style.display = 'block';
-    if (!window.dfoAutoSyncTimer) {
-        window.dfoAutoSyncTimer = setInterval(async () => {
-            const u = window.surveyDB.getCurrentUser();
-            if (u && u.role === 'DFO') {
-                await loadPendingFieldSurveys().catch(() => {});
-            }
-        }, 12000);
+    if (window.dfoAutoSyncTimer) {
+        clearInterval(window.dfoAutoSyncTimer);
+        window.dfoAutoSyncTimer = null;
     }
     document.getElementById('fieldPanel').style.display = 'none';
     document.getElementById('dfoDivisionTitle').textContent = currentDivision;
@@ -524,15 +498,12 @@ async function setupDfoPortal() {
 }
 
 async function loadDfoBoundaries() {
-    if (navigator.onLine && window.surveyDB.syncCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
-    }
     const all = await window.surveyDB.getAll('polygons');
     // Filter strictly to current DFO division
     const divisionPolys = all.filter(p => p.division.toLowerCase() === currentDivision.toLowerCase());
 
     const selRange = document.getElementById('dfoRangeSelect').value;
-    const filtered = (selRange === 'ALL') ? divisionPolys : divisionPolys.filter(p => p.range && p.range.toLowerCase() === selRange.toLowerCase());
+    const filtered = (selRange === 'ALL') ? divisionPolys : divisionPolys.filter(p => p.range && normalizeRange(p.range) === normalizeRange(selRange));
 
     const bSelect = document.getElementById('dfoBoundarySelect');
     bSelect.innerHTML = '';
@@ -544,6 +515,7 @@ async function loadDfoBoundaries() {
         document.getElementById('activeVertexCard').style.display = 'none';
         if (activePolygonLayer) map.removeLayer(activePolygonLayer);
         vertexMarkersGroup.clearLayers();
+        activeMarkerInstances = [];
         return;
     }
 
@@ -591,6 +563,7 @@ async function loadDfoActiveBoundary() {
 function renderActiveBoundary(shouldFitBounds = false) {
     if (activePolygonLayer) map.removeLayer(activePolygonLayer);
     vertexMarkersGroup.clearLayers();
+    activeMarkerInstances = [];
 
     if (!currentBoundaryData || !currentBoundaryData.coordinates || currentBoundaryData.coordinates.length === 0) return;
 
@@ -632,12 +605,13 @@ function renderActiveBoundary(shouldFitBounds = false) {
 
         const newPt = [Number(e.latlng.lng.toFixed(10)), Number(e.latlng.lat.toFixed(10))];
         coords.splice(insertIdx, 0, newPt);
+        currentBoundaryData.updated_at = new Date().toISOString();
         // Auto-flag newly inserted sub-point for field verification
         currentBoundaryData.flaggedVertices = currentBoundaryData.flaggedVertices.map(f => f >= insertIdx ? f + 1 : f);
         currentBoundaryData.flaggedVertices.push(insertIdx);
 
         await window.surveyDB.put('polygons', currentBoundaryData);
-        window.surveyDB.syncCloud().catch(() => {});
+        scheduleCloudSync(1000);
         renderActiveBoundary(false);
         selectActiveVertex(insertIdx);
         alert(`New boundary sub-point added between cairns! Flagged for field ground verification.`);
@@ -656,6 +630,7 @@ function renderActiveBoundary(shouldFitBounds = false) {
         });
 
         const m = L.marker([c[1], c[0]], { icon: icon, draggable: true }).addTo(vertexMarkersGroup);
+        activeMarkerInstances[idx] = m;
 
         m.on('click', () => {
             selectActiveVertex(idx);
@@ -665,7 +640,9 @@ function renderActiveBoundary(shouldFitBounds = false) {
         m.on('drag', (e) => {
             const pos = e.target.getLatLng();
             currentBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
-            activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            if (activePolygonLayer) {
+                activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            }
             const latInp = document.getElementById('editVertexLatInput');
             const lonInp = document.getElementById('editVertexLonInput');
             if (selectedVertexIndex === idx) {
@@ -674,12 +651,24 @@ function renderActiveBoundary(shouldFitBounds = false) {
             }
         });
 
+        // On dragend: 60fps smooth! Never destroy DOM markers!
         m.on('dragend', async (e) => {
             const pos = e.target.getLatLng();
             currentBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
+            currentBoundaryData.updated_at = new Date().toISOString();
+            if (activePolygonLayer) {
+                activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            }
+
+            const curCoords = currentBoundaryData.coordinates;
+            const closed = [...curCoords, curCoords[0]];
+            const poly = turf.polygon([closed]);
+            const areaM2 = turf.area(poly);
+            const areaEl = document.getElementById('dfoDetArea');
+            if (areaEl) areaEl.textContent = `${(areaM2 / 10000).toFixed(2)} Ha (${(areaM2 / 1000000).toFixed(2)} sq.km)`;
+
             await window.surveyDB.put('polygons', currentBoundaryData);
-            window.surveyDB.syncCloud().catch(() => {});
-            renderActiveBoundary(false); // DO NOT ZOOM OUT - KEEP CURRENT ZOOM
+            scheduleCloudSync(1500);
             selectActiveVertex(idx);
         });
     });
@@ -753,9 +742,24 @@ async function saveTypedVertexCoordinates() {
     }
 
     currentBoundaryData.coordinates[selectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+    currentBoundaryData.updated_at = new Date().toISOString();
+
+    if (activeMarkerInstances[selectedVertexIndex]) {
+        activeMarkerInstances[selectedVertexIndex].setLatLng([lat, lon]);
+    }
+    if (activePolygonLayer) {
+        activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+    }
+
+    const coords = currentBoundaryData.coordinates;
+    const closed = [...coords, coords[0]];
+    const poly = turf.polygon([closed]);
+    const areaM2 = turf.area(poly);
+    const areaEl = document.getElementById('dfoDetArea');
+    if (areaEl) areaEl.textContent = `${(areaM2 / 10000).toFixed(2)} Ha (${(areaM2 / 1000000).toFixed(2)} sq.km)`;
+
     await window.surveyDB.put('polygons', currentBoundaryData);
-    window.surveyDB.syncCloud().catch(() => {});
-    renderActiveBoundary(false); // KEEP CURRENT ZOOM
+    scheduleCloudSync(1000);
     selectActiveVertex(selectedVertexIndex);
     map.panTo([lat, lon]);
     alert(`Point #${selectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${format10Dec(lat)}\nLongitude: ${format10Dec(lon)}`);
@@ -767,12 +771,34 @@ async function snapActiveVertexToLiveGps() {
 
     const applyCoords = async (lat, lon) => {
         currentBoundaryData.coordinates[selectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+        currentBoundaryData.updated_at = new Date().toISOString();
         // Remove red action flag since ground point has now been verified
         currentBoundaryData.flaggedVertices = (currentBoundaryData.flaggedVertices || []).filter(f => f !== selectedVertexIndex);
+
+        if (activeMarkerInstances[selectedVertexIndex]) {
+            activeMarkerInstances[selectedVertexIndex].setLatLng([lat, lon]);
+            activeMarkerInstances[selectedVertexIndex].setIcon(L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="vertex-marker-icon vertex-marker-standard" style="width: 26px; height: 26px;">${selectedVertexIndex + 1}</div>`,
+                iconSize: [26, 26],
+                iconAnchor: [13, 13]
+            }));
+        }
+        if (activePolygonLayer) {
+            activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+        }
+
+        const coords = currentBoundaryData.coordinates;
+        const closed = [...coords, coords[0]];
+        const poly = turf.polygon([closed]);
+        const areaM2 = turf.area(poly);
+        const areaEl = document.getElementById('dfoDetArea');
+        if (areaEl) areaEl.textContent = `${(areaM2 / 10000).toFixed(2)} Ha (${(areaM2 / 1000000).toFixed(2)} sq.km)`;
+
         await window.surveyDB.put('polygons', currentBoundaryData);
-        window.surveyDB.syncCloud().catch(() => {});
-        renderActiveBoundary(false); // DO NOT ZOOM OUT
+        scheduleCloudSync(1000);
         selectActiveVertex(selectedVertexIndex);
+        map.panTo([lat, lon]);
         alert(`Point #${selectedVertexIndex + 1} snapped to your live GPS coordinates!\nLatitude: ${format10Dec(lat)}\nLongitude: ${format10Dec(lon)}`);
     };
 
@@ -962,12 +988,12 @@ window.manualSyncSubmissions = async function() {
     }
 };
 
-async function loadPendingFieldSurveys() {
-    if (navigator.onLine && window.surveyDB.pullFromCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
+async function loadPendingFieldSurveys(shouldPull = false) {
+    if (shouldPull && navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        await window.surveyDB.pullFromCloud().catch(() => {});
     }
     const all = await window.surveyDB.getAll('pending_surveys');
-    const divisionSurveys = all.filter(s => s.division.toLowerCase() === currentDivision.toLowerCase());
+    const divisionSurveys = all.filter(s => (s.division || '').toLowerCase() === currentDivision.toLowerCase());
 
     const listEl = document.getElementById('pendingSurveysList');
     document.getElementById('pendingCount').textContent = divisionSurveys.length;
@@ -1327,17 +1353,17 @@ window.switchFieldOperationMode = function(mode) {
     }
 };
 
-window.loadFieldAssignedBoundaries = async function() {
-    if (navigator.onLine && window.surveyDB.syncCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
+window.loadFieldAssignedBoundaries = async function(pullFirst = false) {
+    if (pullFirst && navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
 
     const all = await window.surveyDB.getAll('polygons');
-    // Strictly filter to current field officer's division and range!
+    // Strictly filter to current field officer's division and range using normalizeRange!
     const rangePolys = all.filter(p => 
         p.division && p.range &&
         p.division.toLowerCase() === currentDivision.toLowerCase() &&
-        p.range.toLowerCase() === currentRange.toLowerCase()
+        normalizeRange(p.range) === normalizeRange(currentRange)
     );
 
     const selectEl = document.getElementById('fieldAssignedRfSelect');
@@ -1354,6 +1380,7 @@ window.loadFieldAssignedBoundaries = async function() {
         if (sub) sub.style.display = 'none';
         if (activePolygonLayer) map.removeLayer(activePolygonLayer);
         vertexMarkersGroup.clearLayers();
+        fieldMarkerInstances = [];
         return;
     }
 
@@ -1366,6 +1393,27 @@ window.loadFieldAssignedBoundaries = async function() {
 
     selectEl.value = rangePolys[0].id;
     await loadFieldBoundaryForEditing();
+};
+
+window.manualSyncFieldAssignedBoundaries = async function() {
+    const icon = document.getElementById('fieldSyncIcon');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        if (window.surveyDB && window.surveyDB.pullFromCloud) {
+            await window.surveyDB.pullFromCloud();
+        }
+        await loadFieldAssignedBoundaries(false);
+        if (fieldActiveBoundaryData && fieldActiveBoundaryData.id) {
+            const fresh = await window.surveyDB.get('polygons', fieldActiveBoundaryData.id);
+            if (fresh) {
+                fieldActiveBoundaryData = JSON.parse(JSON.stringify(fresh));
+                renderFieldActiveBoundary(false); // keep current zoom
+                if (fieldSelectedVertexIndex !== null) selectFieldVertex(fieldSelectedVertexIndex);
+            }
+        }
+    } finally {
+        setTimeout(() => { if (icon) icon.classList.remove('fa-spin'); }, 500);
+    }
 };
 
 window.loadFieldBoundaryForEditing = async function() {
@@ -1401,6 +1449,7 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
 
     if (activePolygonLayer) map.removeLayer(activePolygonLayer);
     vertexMarkersGroup.clearLayers();
+    fieldMarkerInstances = [];
 
     const latlngs = fieldActiveBoundaryData.coordinates.map(c => [c[1], c[0]]);
 
@@ -1427,6 +1476,7 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
         });
 
         const marker = L.marker([c[1], c[0]], { icon: icon, draggable: true }).addTo(vertexMarkersGroup);
+        fieldMarkerInstances[idx] = marker;
 
         marker.on('click', () => {
             selectFieldVertex(idx);
@@ -1435,20 +1485,30 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
         marker.on('drag', (e) => {
             const pos = e.target.getLatLng();
             fieldActiveBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
-            activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            if (activePolygonLayer) {
+                activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            }
 
             if (idx === fieldSelectedVertexIndex) {
-                document.getElementById('fieldVertexLatInput').value = pos.lat.toFixed(10);
-                document.getElementById('fieldVertexLonInput').value = pos.lng.toFixed(10);
+                const latInp = document.getElementById('fieldVertexLatInput');
+                const lonInp = document.getElementById('fieldVertexLonInput');
+                if (latInp) latInp.value = pos.lat.toFixed(10);
+                if (lonInp) lonInp.value = pos.lng.toFixed(10);
             }
 
             const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
             const ha = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
-            document.getElementById('fieldRfArea').textContent = `${ha} Ha`;
+            const areaEl = document.getElementById('fieldRfArea');
+            if (areaEl) areaEl.textContent = `${ha} Ha`;
         });
 
+        // 60fps smooth dragend: never destroy DOM markers!
         marker.on('dragend', () => {
-            renderFieldActiveBoundary(false); // DO NOT ZOOM OUT - KEEP CURRENT ZOOM
+            const pos = marker.getLatLng();
+            fieldActiveBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
+            if (activePolygonLayer) {
+                activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+            }
             selectFieldVertex(idx);
         });
     });
@@ -1463,9 +1523,9 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
         for (let i = 0; i < coords.length; i++) {
             const nextIdx = (i + 1) % coords.length;
             const line = turf.lineString([coords[i], coords[nextIdx]]);
-            const d = turf.pointToLineDistance(clickPt, line);
-            if (d < minDistance) {
-                minDistance = d;
+            const dist = turf.pointToLineDistance(clickPt, line);
+            if (dist < minDistance) {
+                minDistance = dist;
                 bestIndex = nextIdx;
             }
         }
@@ -1480,17 +1540,40 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
 
 window.selectFieldVertex = function(idx) {
     if (!fieldActiveBoundaryData || !fieldActiveBoundaryData.coordinates[idx]) return;
+    const prevIdx = fieldSelectedVertexIndex;
     fieldSelectedVertexIndex = idx;
     const c = fieldActiveBoundaryData.coordinates[idx];
 
-    document.getElementById('fieldActiveVertexCard').style.display = 'block';
-    document.getElementById('fieldActivePointNum').textContent = `Point #${idx + 1}`;
-    document.getElementById('fieldVertexLatInput').value = Number(c[1]).toFixed(10);
-    document.getElementById('fieldVertexLonInput').value = Number(c[0]).toFixed(10);
+    // Smoothly update marker selection styling without destroying DOM nodes
+    if (prevIdx !== null && prevIdx !== idx && fieldMarkerInstances[prevIdx]) {
+        fieldMarkerInstances[prevIdx].setIcon(L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div class="vertex-marker-icon" style="background:#059669; width:28px; height:28px; border:2px solid #ffffff;">${prevIdx + 1}</div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        }));
+    }
+    if (fieldMarkerInstances[idx]) {
+        fieldMarkerInstances[idx].setIcon(L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div class="vertex-marker-icon selected" style="background:#0284c7; width:28px; height:28px; border:2px solid #ffffff;">${idx + 1}</div>`,
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        }));
+    }
+
+    const card = document.getElementById('fieldActiveVertexCard');
+    if (card) card.style.display = 'block';
+    const numEl = document.getElementById('fieldActivePointNum');
+    if (numEl) numEl.textContent = `Point #${idx + 1}`;
+    const latInp = document.getElementById('fieldVertexLatInput');
+    const lonInp = document.getElementById('fieldVertexLonInput');
+    if (latInp) latInp.value = Number(c[1]).toFixed(10);
+    if (lonInp) lonInp.value = Number(c[0]).toFixed(10);
 };
 
 window.saveFieldVertexCoords = function() {
-    if (!fieldActiveBoundaryData) return;
+    if (!fieldActiveBoundaryData || fieldSelectedVertexIndex === null) return;
     const latInp = document.getElementById('fieldVertexLatInput');
     const lonInp = document.getElementById('fieldVertexLonInput');
     const lat = parseFloat(latInp.value);
@@ -1502,19 +1585,49 @@ window.saveFieldVertexCoords = function() {
     }
 
     fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
-    renderFieldActiveBoundary(false); // DO NOT ZOOM OUT
+    if (fieldMarkerInstances[fieldSelectedVertexIndex]) {
+        fieldMarkerInstances[fieldSelectedVertexIndex].setLatLng([lat, lon]);
+    }
+    if (activePolygonLayer) {
+        activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+    }
+
+    const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
+    const ha = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+    const areaEl = document.getElementById('fieldRfArea');
+    if (areaEl) areaEl.textContent = `${ha} Ha`;
+
+    map.panTo([lat, lon]);
     selectFieldVertex(fieldSelectedVertexIndex);
     alert(`Cairn #${fieldSelectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
 };
 
 window.snapFieldVertexToStandingGps = function() {
-    if (!fieldActiveBoundaryData) return;
+    if (!fieldActiveBoundaryData || fieldSelectedVertexIndex === null) return;
 
     const applyCoords = (lat, lon) => {
         fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
-        renderFieldActiveBoundary(false); // DO NOT ZOOM OUT - KEEP MAP EXACTLY AS ZOOMED
+
+        if (fieldMarkerInstances[fieldSelectedVertexIndex]) {
+            fieldMarkerInstances[fieldSelectedVertexIndex].setLatLng([lat, lon]);
+        }
+        if (activePolygonLayer) {
+            activePolygonLayer.setLatLngs(fieldActiveBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
+        }
+
+        const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
+        const ha = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+        const areaEl = document.getElementById('fieldRfArea');
+        if (areaEl) areaEl.textContent = `${ha} Ha`;
+
+        const latInp = document.getElementById('fieldVertexLatInput');
+        const lonInp = document.getElementById('fieldVertexLonInput');
+        if (latInp) latInp.value = Number(lat).toFixed(10);
+        if (lonInp) lonInp.value = Number(lon).toFixed(10);
+
+        map.panTo([lat, lon]);
         selectFieldVertex(fieldSelectedVertexIndex);
-        alert(`Point #${fieldSelectedVertexIndex + 1} snapped to your standing GPS location!\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+        alert(`Point #${fieldSelectedVertexIndex + 1} snapped to your standing GPS location!\nLatitude: ${Number(lat).toFixed(10)}\nLongitude: ${Number(lon).toFixed(10)}`);
     };
 
     if (liveGpsLocation && liveGpsLocation.lat && liveGpsLocation.lon) {
@@ -1586,6 +1699,9 @@ window.submitFieldRfRevision = async function() {
 };
 
 async function setupFieldPortal() {
+    if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        try { await window.surveyDB.pullFromCloud(); } catch(e) {}
+    }
     document.getElementById('dfoPanel').style.display = 'none';
     document.getElementById('fieldPanel').style.display = 'block';
 
