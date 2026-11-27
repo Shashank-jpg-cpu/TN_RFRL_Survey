@@ -1,11 +1,11 @@
 {
-  "name": "RF/RL Boundary Survey & Revision Platform",
-  "short_name": "Forest Survey",
+  "name": "TN RFRL Survey",
+  "short_name": "TN RFRL Survey",
   "description": "Tamil Nadu Forest Department - RF/RL Ground GPS Vertex Revision & Survey Portal",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#121e28",
+  "background_color": "#060b14",
+  "theme_color": "#0b1320",
   "orientation": "any",
   "icons": [
     {

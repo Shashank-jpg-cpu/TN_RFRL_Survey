@@ -40,6 +40,11 @@
         </div>
 
         <div class="header-right">
+            <!-- Android APK Download Button in Header -->
+            <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" id="btnDownloadApkHeader" class="btn-apk-header" title="Download Android Mobile App (TN RFRL Survey.apk)">
+                <i class="fa-brands fa-android"></i> <span class="hide-mobile">TN RFRL Survey (.apk)</span>
+            </a>
+
             <!-- Centimeter / RTK Accuracy Mode Guide Button -->
             <button class="btn-rtk-mode" onclick="openRtkModal()" title="Centimeter & RTK GPS Configuration">
                 <i class="fa-solid fa-crosshairs"></i> <span class="hide-mobile">Centimeter / RTK Mode</span>
@@ -206,6 +211,17 @@
                     </div>
                 </div>
 
+                <!-- Mobile App APK Download Block (DFO Portal) -->
+                <div class="apk-download-box">
+                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-block" title="Download Offline Android App (TN RFRL Survey.apk)">
+                        <i class="fa-brands fa-android apk-icon-large"></i>
+                        <div class="apk-btn-text">
+                            <span class="apk-btn-title">Download Mobile App (.apk)</span>
+                            <span class="apk-btn-sub">TN RFRL Survey &bull; Offline Android APK</span>
+                        </div>
+                    </a>
+                </div>
+
                 <!-- Field Staff Access Management Button (Opens Dedicated Window) -->
                 <div class="staff-mgmt-btn-box">
                     <button type="button" class="btn-staff-mgmt-open" onclick="openStaffManagementModal()">
@@ -353,6 +369,17 @@
                     <div id="capturedPointsList" class="captured-list">
                         <div class="empty-hint">Walk to boundary cairn 1 and tap "Capture Point #1".</div>
                     </div>
+                </div>
+
+                <!-- Mobile App APK Download Block (Field Portal) -->
+                <div class="apk-download-box">
+                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-block" title="Download Offline Android App (TN RFRL Survey.apk)">
+                        <i class="fa-brands fa-android apk-icon-large"></i>
+                        <div class="apk-btn-text">
+                            <span class="apk-btn-title">Download Mobile App (.apk)</span>
+                            <span class="apk-btn-sub">TN RFRL Survey &bull; Offline Android APK</span>
+                        </div>
+                    </a>
                 </div>
 
                 <!-- Field Officer KML Export -->
@@ -573,6 +600,13 @@
                 </div>
 
                 <div id="loginError" class="login-error" style="display: none;"></div>
+
+                <div class="login-apk-banner">
+                    <a href="TN_RFRL_Survey.apk" download="TN_RFRL_Survey.apk" class="btn-download-apk-login" title="Download Android Mobile App (TN RFRL Survey.apk)">
+                        <i class="fa-brands fa-android"></i>
+                        <span>Download Mobile App: <b>TN RFRL Survey (.apk)</b></span>
+                    </a>
+                </div>
 
                 <button type="submit" class="btn-primary btn-block btn-lg" style="margin-top: 14px;">
                     <i class="fa-solid fa-lock"></i> Access Department Portal
