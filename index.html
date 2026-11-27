@@ -21,7 +21,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=3').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=4').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -223,8 +223,11 @@
 
                 <!-- Submissions from Field Officers (Pending Review) -->
                 <div class="pending-submissions-card">
-                    <div class="section-subtitle">
-                        <i class="fa-solid fa-inbox"></i> Field Officer Submissions (<span id="pendingCount">0</span>)
+                    <div class="section-subtitle" style="display: flex; justify-content: space-between; align-items: center;">
+                        <span><i class="fa-solid fa-inbox"></i> Field Officer Submissions (<span id="pendingCount">0</span>)</span>
+                        <button type="button" class="btn-sync-cloud-icon" onclick="manualSyncSubmissions()" title="Sync Submissions from Cloud">
+                            <i id="syncSubmissionsIcon" class="fa-solid fa-arrows-rotate"></i> Sync Cloud
+                        </button>
                     </div>
                     <div id="pendingSurveysList" class="pending-list">
                         <div class="empty-hint">No pending field surveys.</div>

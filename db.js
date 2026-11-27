@@ -243,33 +243,136 @@ class SurveyDB {
     // -------------------------------------------------------------------------
     // CLOUD REAL-TIME DATABASE SYNCHRONIZATION ENGINE
     // -------------------------------------------------------------------------
+    getDeviceId() {
+        let id = localStorage.getItem('tn_forest_device_id');
+        if (!id) {
+            id = 'dev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+            localStorage.setItem('tn_forest_device_id', id);
+        }
+        return id;
+    }
+
+    getDeviceType() {
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+        return isMobile ? 'Mobile Phone' : 'Desktop Computer';
+    }
+
+    async acquireSession(sessionKey, force = false) {
+        if (!navigator.onLine) return { success: true };
+        try {
+            const res = await fetch('/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'acquire_session',
+                    sessionKey: sessionKey,
+                    deviceId: this.getDeviceId(),
+                    deviceType: this.getDeviceType(),
+                    force: force
+                })
+            });
+            if (res.ok) {
+                return await res.json();
+            }
+        } catch (e) {
+            console.warn('Session acquire note:', e.message);
+        }
+        return { success: true };
+    }
+
+    async sendHeartbeat(sessionKey) {
+        if (!navigator.onLine || !sessionKey) return { success: true };
+        try {
+            const res = await fetch('/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'heartbeat',
+                    sessionKey: sessionKey,
+                    deviceId: this.getDeviceId(),
+                    deviceType: this.getDeviceType()
+                })
+            });
+            if (res.ok) {
+                return await res.json();
+            }
+        } catch (e) {}
+        return { success: true };
+    }
+
+    async releaseSession(sessionKey) {
+        if (!navigator.onLine || !sessionKey) return;
+        try {
+            await fetch('/api/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'release_session',
+                    sessionKey: sessionKey,
+                    deviceId: this.getDeviceId()
+                })
+            });
+        } catch (e) {}
+    }
+
+    startHeartbeat(sessionKey) {
+        this.stopHeartbeat();
+        if (!sessionKey) return;
+        this.heartbeatTimer = setInterval(async () => {
+            const res = await this.sendHeartbeat(sessionKey);
+            if (res && res.code === 'SESSION_TERMINATED') {
+                this.stopHeartbeat();
+                alert(`Portal Session Terminated: This account was logged into on another device (${res.deviceType || 'Remote Device'}). You have been logged out.`);
+                this.logout();
+                if (typeof checkAuthSession === 'function') checkAuthSession();
+            }
+        }, 15000);
+    }
+
+    stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+    }
+
     async pullFromCloud() {
         if (!navigator.onLine) return false;
         try {
-            const res = await fetch('/api/sync', { method: 'GET' });
+            const res = await fetch('/api/sync', { method: 'GET', cache: 'no-store' });
             if (!res.ok) return false;
             const json = await res.json();
             if (json && json.success && json.data) {
                 const cloudData = json.data;
 
-                // Sync Users
+                // 1. Remove deleted surveys locally
+                if (cloudData.deleted_survey_ids && Array.isArray(cloudData.deleted_survey_ids)) {
+                    for (const delId of cloudData.deleted_survey_ids) {
+                        await this.delete('pending_surveys', delId);
+                    }
+                }
+
+                // 2. Sync Users
                 if (cloudData.users && Array.isArray(cloudData.users)) {
                     for (const u of cloudData.users) {
                         await this.put('users', u);
                     }
                 }
 
-                // Sync Polygons
+                // 3. Sync Polygons
                 if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
                     for (const p of cloudData.polygons) {
                         await this.put('polygons', p);
                     }
                 }
 
-                // Sync Pending Surveys
+                // 4. Sync Pending Surveys
+                const delSet = new Set(cloudData.deleted_survey_ids || []);
                 if (cloudData.pending_surveys && Array.isArray(cloudData.pending_surveys)) {
                     for (const s of cloudData.pending_surveys) {
-                        await this.put('pending_surveys', s);
+                        if (!delSet.has(s.id)) {
+                            await this.put('pending_surveys', s);
+                        }
                     }
                 }
 
@@ -281,17 +384,25 @@ class SurveyDB {
         return false;
     }
 
-    async syncCloud() {
+    async syncCloud(options = {}) {
         if (!navigator.onLine) return false;
         try {
             const users = await this.getAll('users');
             const polygons = await this.getAll('polygons');
             const pending_surveys = await this.getAll('pending_surveys');
 
+            const payload = {
+                action: 'sync_data',
+                users: users,
+                polygons: polygons,
+                pending_surveys: pending_surveys,
+                deleted_survey_ids: options.deletedSurveyId ? [options.deletedSurveyId] : []
+            };
+
             const res = await fetch('/api/sync', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ users, polygons, pending_surveys })
+                body: JSON.stringify(payload)
             });
 
             return res.ok;
@@ -337,7 +448,7 @@ class SurveyDB {
     // -------------------------------------------------------------------------
     // ROLE-BASED AUTHENTICATION ENGINE
     // -------------------------------------------------------------------------
-    async authenticate(division, role, range, username, password) {
+    async authenticate(division, role, range, username, password, force = false) {
         const cleanUser = (username || '').trim().toLowerCase();
         const cleanPass = (password || '').trim();
 
@@ -351,15 +462,30 @@ class SurveyDB {
             const passMatches = (cleanPass === validPassword || cleanPass === 'dfo@123' || cleanPass === 'admin@123');
 
             if (userMatches && passMatches) {
+                const sessionKey = `DFO_${division.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+
+                // Enforce single active device session across cloud
+                const sessionStatus = await this.acquireSession(sessionKey, force);
+                if (sessionStatus && !sessionStatus.success && sessionStatus.code === 'ALREADY_LOGGED_IN') {
+                    return {
+                        blocked: true,
+                        sessionKey: sessionKey,
+                        deviceType: sessionStatus.deviceType || 'Another Device',
+                        message: sessionStatus.message || `Portal is already actively open on ${sessionStatus.deviceType || 'another device'}.`
+                    };
+                }
+
                 const session = {
                     division: division,
                     role: 'DFO',
                     range: null,
                     username: expectedCreds ? expectedCreds.username : `dfo_${cleanUser}`,
                     name: `DFO (${division})`,
+                    sessionKey: sessionKey,
                     login_time: new Date().toISOString()
                 };
                 localStorage.setItem('tn_forest_survey_session_v4', JSON.stringify(session));
+                this.startHeartbeat(sessionKey);
                 return session;
             }
             return null;
@@ -407,15 +533,30 @@ class SurveyDB {
             }
 
             if (user) {
+                const sessionKey = `FO_${cleanUser.toUpperCase()}`;
+
+                // Enforce single active device session across cloud
+                const sessionStatus = await this.acquireSession(sessionKey, force);
+                if (sessionStatus && !sessionStatus.success && sessionStatus.code === 'ALREADY_LOGGED_IN') {
+                    return {
+                        blocked: true,
+                        sessionKey: sessionKey,
+                        deviceType: sessionStatus.deviceType || 'Another Device',
+                        message: sessionStatus.message || `Field Officer portal is already actively open on ${sessionStatus.deviceType || 'another device'}.`
+                    };
+                }
+
                 const session = {
                     division: division,
                     role: 'FIELD_OFFICER',
                     range: range,
                     username: user.username,
                     name: user.name || `Field Officer (${range})`,
+                    sessionKey: sessionKey,
                     login_time: new Date().toISOString()
                 };
                 localStorage.setItem('tn_forest_survey_session_v4', JSON.stringify(session));
+                this.startHeartbeat(sessionKey);
                 return session;
             }
             return null;
@@ -429,7 +570,12 @@ class SurveyDB {
         return s ? JSON.parse(s) : null;
     }
 
-    logout() {
+    async logout() {
+        const s = this.getCurrentUser();
+        if (s && s.sessionKey) {
+            await this.releaseSession(s.sessionKey);
+        }
+        this.stopHeartbeat();
         localStorage.removeItem('tn_forest_survey_session_v4');
     }
 }

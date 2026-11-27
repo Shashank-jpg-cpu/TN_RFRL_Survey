@@ -208,7 +208,7 @@ function togglePasswordVisibility(inputId, iconId) {
 }
 
 async function handleUniversalLogin(e) {
-    e.preventDefault();
+    if (e) e.preventDefault();
     const div = document.getElementById('loginDivision').value;
     const range = document.getElementById('loginRange') ? document.getElementById('loginRange').value : null;
     const user = document.getElementById('loginUsername').value.trim();
@@ -216,7 +216,21 @@ async function handleUniversalLogin(e) {
     const errBox = document.getElementById('loginError');
 
     try {
-        const session = await window.surveyDB.authenticate(div, selectedLoginRole, range, user, pass);
+        const session = await window.surveyDB.authenticate(div, selectedLoginRole, range, user, pass, false);
+
+        if (session && session.blocked) {
+            errBox.innerHTML = `
+                <div class="session-blocked-notice">
+                    <div class="blocked-title"><i class="fa-solid fa-triangle-exclamation"></i> ACCESS RESTRICTED: Already Logged In</div>
+                    <div class="blocked-desc">This portal is currently active on <b>${session.deviceType}</b>.<br>Only 1 active login is allowed at a time.</div>
+                    <button type="button" class="btn-force-takeover" onclick="handleForceLogin()">
+                        <i class="fa-solid fa-right-to-bracket"></i> Force Logout ${session.deviceType} &amp; Login Here
+                    </button>
+                </div>
+            `;
+            errBox.style.display = 'block';
+            return;
+        }
 
         if (session) {
             errBox.style.display = 'none';
@@ -236,6 +250,28 @@ async function handleUniversalLogin(e) {
         errBox.style.display = 'block';
     }
 }
+
+window.handleForceLogin = async function() {
+    const div = document.getElementById('loginDivision').value;
+    const range = document.getElementById('loginRange') ? document.getElementById('loginRange').value : null;
+    const user = document.getElementById('loginUsername').value.trim();
+    const pass = document.getElementById('loginPassword').value.trim();
+    const errBox = document.getElementById('loginError');
+
+    try {
+        const session = await window.surveyDB.authenticate(div, selectedLoginRole, range, user, pass, true);
+        if (session && !session.blocked) {
+            errBox.style.display = 'none';
+            checkAuthSession();
+        } else {
+            errBox.textContent = session ? session.message : 'Unable to acquire portal session.';
+            errBox.style.display = 'block';
+        }
+    } catch (err) {
+        errBox.textContent = `Login error: ${err.message}`;
+        errBox.style.display = 'block';
+    }
+};
 
 function checkAuthSession() {
     const user = window.surveyDB.getCurrentUser();
@@ -339,6 +375,14 @@ async function setupDfoPortal() {
         await window.surveyDB.pullFromCloud().catch(() => {});
     }
     document.getElementById('dfoPanel').style.display = 'block';
+    if (!window.dfoAutoSyncTimer) {
+        window.dfoAutoSyncTimer = setInterval(async () => {
+            const u = window.surveyDB.getCurrentUser();
+            if (u && u.role === 'DFO') {
+                await loadPendingFieldSurveys().catch(() => {});
+            }
+        }, 12000);
+    }
     document.getElementById('fieldPanel').style.display = 'none';
     document.getElementById('dfoDivisionTitle').textContent = currentDivision;
 
@@ -742,7 +786,26 @@ document.getElementById('kmlFileInput').addEventListener('change', async (e) => 
 });
 
 // Load submissions sent by field officers
+
+window.manualSyncSubmissions = async function() {
+    const icon = document.getElementById('syncSubmissionsIcon');
+    if (icon) icon.classList.add('fa-spin');
+    try {
+        if (window.surveyDB.pullFromCloud) {
+            await window.surveyDB.pullFromCloud();
+        }
+        await loadPendingFieldSurveys();
+    } finally {
+        setTimeout(() => {
+            if (icon) icon.classList.remove('fa-spin');
+        }, 500);
+    }
+};
+
 async function loadPendingFieldSurveys() {
+    if (navigator.onLine && window.surveyDB.pullFromCloud) {
+        await window.surveyDB.pullFromCloud().catch(() => {});
+    }
     const all = await window.surveyDB.getAll('pending_surveys');
     const divisionSurveys = all.filter(s => s.division.toLowerCase() === currentDivision.toLowerCase());
 
@@ -841,6 +904,9 @@ async function acceptFieldSurvey(surveyId) {
 
     await window.surveyDB.put('polygons', officialPoly);
     await window.surveyDB.delete('pending_surveys', surveyId);
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud({ deletedSurveyId: surveyId }).catch(() => {});
+    }
 
     if (previewSurveyLayer) map.removeLayer(previewSurveyLayer);
     if (previewMarkersGroup) previewMarkersGroup.clearLayers();
@@ -860,6 +926,9 @@ async function acceptFieldSurvey(surveyId) {
 async function rejectFieldSurvey(surveyId) {
     if (confirm('Reject and delete this field survey?')) {
         await window.surveyDB.delete('pending_surveys', surveyId);
+        if (navigator.onLine && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud({ deletedSurveyId: surveyId }).catch(() => {});
+        }
         if (previewSurveyLayer) map.removeLayer(previewSurveyLayer);
         if (previewMarkersGroup) previewMarkersGroup.clearLayers();
         await loadPendingFieldSurveys();
@@ -1404,6 +1473,9 @@ async function submitSurveyToDfo() {
     };
 
     await window.surveyDB.put('pending_surveys', submission);
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
 
     if (isMapClickActive) toggleMapClickMode(false);
     newSurveyPoints = [];
