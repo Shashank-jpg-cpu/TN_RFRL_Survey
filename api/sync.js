@@ -254,7 +254,7 @@ module.exports = async function handler(req, res) {
             }
             store.pending_surveys = Array.from(survMap.values());
 
-            // 4. Merge polygons for ALL divisions (filtering out deleted ones)
+            // 4. Merge polygons for ALL divisions (filtering out deleted ones, prioritizing latest updated_at)
             const delPolySet = new Set(store.deleted_polygon_ids || []);
             const polyMap = new Map();
             (store.polygons || []).forEach(p => {
@@ -263,7 +263,16 @@ module.exports = async function handler(req, res) {
             if (body.polygons && Array.isArray(body.polygons)) {
                 body.polygons.forEach(p => {
                     if (p && p.id && !delPolySet.has(p.id)) {
-                        polyMap.set(p.id, p);
+                        const existing = polyMap.get(p.id);
+                        if (!existing) {
+                            polyMap.set(p.id, p);
+                        } else {
+                            const existTime = existing.updated_at ? new Date(existing.updated_at).getTime() : (existing.created_at ? new Date(existing.created_at).getTime() : 0);
+                            const inTime = p.updated_at ? new Date(p.updated_at).getTime() : (p.created_at ? new Date(p.created_at).getTime() : 0);
+                            if (inTime >= existTime) {
+                                polyMap.set(p.id, p);
+                            }
+                        }
                     }
                 });
             }

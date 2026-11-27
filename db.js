@@ -420,11 +420,13 @@ class SurveyDB {
 
     startHeartbeat(sessionKey) {
         this.stopHeartbeat();
+        this.startContinuousSync();
         if (!sessionKey) return;
         this.heartbeatTimer = setInterval(async () => {
             const res = await this.sendHeartbeat(sessionKey);
             if (res && res.code === 'SESSION_TERMINATED') {
                 this.stopHeartbeat();
+                this.stopContinuousSync();
                 alert(`Portal Session Terminated: This account was opened on another device (${res.deviceType || 'Remote Device'}). You have been logged out.`);
                 this.logout();
                 if (typeof checkAuthSession === 'function') checkAuthSession();
@@ -439,9 +441,31 @@ class SurveyDB {
         }
     }
 
+    startContinuousSync() {
+        this.stopContinuousSync();
+        // Continuously poll cloud every 5 seconds for live boundary & survey updates
+        this.continuousSyncTimer = setInterval(async () => {
+            if (navigator.onLine) {
+                try {
+                    await this.pullFromCloud();
+                } catch(e) {}
+            }
+        }, 5000);
+    }
+
+    stopContinuousSync() {
+        if (this.continuousSyncTimer) {
+            clearInterval(this.continuousSyncTimer);
+            this.continuousSyncTimer = null;
+        }
+    }
+
     async applyCloudData(cloudData) {
         if (!cloudData) return;
         try {
+            let anyPolygonUpdated = false;
+            let pendingSurveysChanged = false;
+
             // 1. Remove deleted surveys locally
             if (cloudData.deleted_survey_ids && Array.isArray(cloudData.deleted_survey_ids)) {
                 for (const delId of cloudData.deleted_survey_ids) {
@@ -473,12 +497,25 @@ class SurveyDB {
                 }
             }
 
-            // 3. Sync Polygons
+            // 3. Sync Polygons (latest updated_at wins)
             if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
                 const delPolys = new Set(cloudData.deleted_polygon_ids || []);
                 for (const p of cloudData.polygons) {
                     if (p && p.id && !delPolys.has(p.id)) {
-                        await this.put('polygons', p);
+                        const local = await this.get('polygons', p.id);
+                        if (!local) {
+                            await this.put('polygons', p);
+                            anyPolygonUpdated = true;
+                        } else {
+                            const localTime = local.updated_at ? new Date(local.updated_at).getTime() : (local.created_at ? new Date(local.created_at).getTime() : 0);
+                            const cloudTime = p.updated_at ? new Date(p.updated_at).getTime() : (p.created_at ? new Date(p.created_at).getTime() : 0);
+                            const coordsChanged = JSON.stringify(local.coordinates) !== JSON.stringify(p.coordinates);
+
+                            if (cloudTime > localTime || coordsChanged) {
+                                await this.put('polygons', p);
+                                if (coordsChanged) anyPolygonUpdated = true;
+                            }
+                        }
                     }
                 }
             }
@@ -488,9 +525,24 @@ class SurveyDB {
             if (cloudData.pending_surveys && Array.isArray(cloudData.pending_surveys)) {
                 for (const s of cloudData.pending_surveys) {
                     if (s && s.id && !delSet.has(s.id)) {
-                        await this.put('pending_surveys', s);
+                        const localSurv = await this.get('pending_surveys', s.id);
+                        if (!localSurv) {
+                            await this.put('pending_surveys', s);
+                            pendingSurveysChanged = true;
+                        }
                     }
                 }
+            }
+
+            // Dispatch global event so UI immediately re-renders active map boundary
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('cloud-data-synced', {
+                    detail: {
+                        polygonsUpdated: anyPolygonUpdated,
+                        pendingSurveysChanged: pendingSurveysChanged,
+                        polygons: cloudData.polygons || []
+                    }
+                }));
             }
         } catch (e) {
             console.warn('applyCloudData error:', e.message);
@@ -778,6 +830,7 @@ class SurveyDB {
             await this.releaseSession(s.sessionKey);
         }
         this.stopHeartbeat();
+        this.stopContinuousSync();
         localStorage.removeItem('tn_forest_survey_session_v4');
     }
 }

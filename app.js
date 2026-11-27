@@ -325,8 +325,9 @@ async function checkAuthSession() {
         } catch (e) {}
     }
 
-    // Session is valid for this device: start continuous heartbeat
+    // Session is valid for this device: start continuous heartbeat & continuous live cloud sync
     if (window.surveyDB.startHeartbeat) window.surveyDB.startHeartbeat(sessionKey);
+    if (window.surveyDB.startContinuousSync) window.surveyDB.startContinuousSync();
 
     if (loginScreen) loginScreen.style.display = 'none';
     if (appHeader) appHeader.style.display = 'flex';
@@ -391,6 +392,47 @@ async function handleLogout(e) {
     setTimeout(() => { isLoggingOut = false; }, 1500);
 }
 window.handleLogout = handleLogout;
+
+// -------------------------------------------------------------------------
+// CONTINUOUS LIVE CLOUD SYNC LISTENER (Real-Time Boundary & Map Updates)
+// -------------------------------------------------------------------------
+window.addEventListener('cloud-data-synced', async (e) => {
+    const user = window.surveyDB ? window.surveyDB.getCurrentUser() : null;
+    if (!user) return;
+
+    if (user.role === 'DFO') {
+        // Refresh pending field surveys on DFO screen
+        if (typeof loadPendingFieldSurveys === 'function') {
+            await loadPendingFieldSurveys();
+        }
+
+        // If a boundary is currently loaded on map, check if its coordinates updated in DB
+        if (currentBoundaryData && currentBoundaryData.id) {
+            const fresh = await window.surveyDB.get('polygons', currentBoundaryData.id);
+            if (fresh && JSON.stringify(fresh.coordinates) !== JSON.stringify(currentBoundaryData.coordinates)) {
+                console.log('Live cloud polygon update detected for active boundary:', fresh.name);
+                currentBoundaryData = fresh;
+                renderActiveBoundary(false); // LIVE UPDATE ON MAP WITH ZERO ZOOM RESET
+                if (selectedVertexIndex !== null) {
+                    selectActiveVertex(selectedVertexIndex);
+                }
+            }
+        }
+    } else if (user.role === 'FIELD_OFFICER') {
+        // If Field Officer has an active boundary loaded, check if it was updated by DFO
+        if (fieldActiveBoundaryData && fieldActiveBoundaryData.id) {
+            const fresh = await window.surveyDB.get('polygons', fieldActiveBoundaryData.id);
+            if (fresh && JSON.stringify(fresh.coordinates) !== JSON.stringify(fieldActiveBoundaryData.coordinates)) {
+                console.log('Live cloud polygon update detected for field boundary:', fresh.name);
+                fieldActiveBoundaryData = JSON.parse(JSON.stringify(fresh));
+                renderFieldActiveBoundary(false); // LIVE UPDATE ON MAP WITH ZERO ZOOM RESET
+                if (fieldSelectedVertexIndex !== null) {
+                    selectFieldVertex(fieldSelectedVertexIndex);
+                }
+            }
+        }
+    }
+});
 
 // -------------------------------------------------------------------------
 // PWA INSTALLATION PROMPT HANDLER (One-Tap Install for Android & Mobile)
@@ -901,10 +943,18 @@ window.manualSyncSubmissions = async function() {
     const icon = document.getElementById('syncSubmissionsIcon');
     if (icon) icon.classList.add('fa-spin');
     try {
-        if (window.surveyDB.pullFromCloud) {
+        if (window.surveyDB && window.surveyDB.syncCloud) {
             await window.surveyDB.syncCloud();
         }
         await loadPendingFieldSurveys();
+        await loadDfoBoundaries();
+        if (currentBoundaryData && currentBoundaryData.id) {
+            const fresh = await window.surveyDB.get('polygons', currentBoundaryData.id);
+            if (fresh) {
+                currentBoundaryData = fresh;
+                renderActiveBoundary(false);
+            }
+        }
     } finally {
         setTimeout(() => {
             if (icon) icon.classList.remove('fa-spin');
@@ -1047,11 +1097,16 @@ async function acceptFieldSurvey(surveyId) {
 
     await window.surveyDB.delete('pending_surveys', surveyId);
     if (navigator.onLine && window.surveyDB.syncCloud) {
-        await window.surveyDB.syncCloud({ deletedSurveyId: surveyId }).catch(() => {});
+        await window.surveyDB.syncCloud({ deletedSurveyId: surveyId });
     }
 
     if (previewSurveyLayer) map.removeLayer(previewSurveyLayer);
     if (previewMarkersGroup) previewMarkersGroup.clearLayers();
+
+    if (currentBoundaryData && savedPoly && currentBoundaryData.id === savedPoly.id) {
+        currentBoundaryData = savedPoly;
+        renderActiveBoundary(false); // DO NOT RESET ZOOM
+    }
 
     alert(`Boundary "${survey.name}" ${survey.is_revision ? 'revision accepted & overwritten' : 'accepted & loaded'} in ${survey.division} official database!`);
     await loadPendingFieldSurveys();
