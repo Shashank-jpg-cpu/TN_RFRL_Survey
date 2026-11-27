@@ -92,6 +92,7 @@ module.exports = async function handler(req, res) {
             const action = body.action || 'sync_data';
             const store = await fetchMasterStore();
             const now = Date.now();
+            const SESSION_TIMEOUT_MS = 120000; // 2 minutes active window
 
             // -------------------------------------------------------------
             // ACTION 1: ACQUIRE EXCLUSIVE SESSION (Single Login Enforcement)
@@ -103,7 +104,6 @@ module.exports = async function handler(req, res) {
                 }
 
                 const currentSession = store.active_sessions[sessionKey];
-                const SESSION_TIMEOUT_MS = 45000; // 45 seconds timeout if tab abruptly closed
 
                 if (currentSession && currentSession.deviceId !== deviceId && (now - (currentSession.lastHeartbeat || 0) < SESSION_TIMEOUT_MS) && !force) {
                     return res.status(200).json({
@@ -133,30 +133,43 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // ACTION 2: HEARTBEAT (Keep Session Alive & Detect Remote Takeover)
+            // ACTION 2: HEARTBEAT (Keep Alive & Remote Device Verification)
             // -------------------------------------------------------------
             if (action === 'heartbeat') {
-                const { sessionKey, deviceId } = body;
+                const { sessionKey, deviceId, deviceType } = body;
                 if (!sessionKey || !deviceId) {
                     return res.status(200).json({ success: true });
                 }
 
                 const currentSession = store.active_sessions[sessionKey];
+
                 if (!currentSession || currentSession.deviceId === deviceId) {
-                    if (!store.active_sessions[sessionKey]) {
-                        store.active_sessions[sessionKey] = { deviceId, deviceType: body.deviceType || 'Device', lastHeartbeat: now };
-                    } else {
-                        store.active_sessions[sessionKey].lastHeartbeat = now;
-                    }
+                    store.active_sessions[sessionKey] = {
+                        deviceId: deviceId,
+                        deviceType: deviceType || (currentSession ? currentSession.deviceType : 'Device'),
+                        lastHeartbeat: now,
+                        loginTime: currentSession ? currentSession.loginTime : now
+                    };
                     await putMasterStore(store);
                     return res.status(200).json({ success: true });
-                } else {
-                    // Session was taken over by another device!
+                } else if (now - (currentSession.lastHeartbeat || 0) < SESSION_TIMEOUT_MS) {
+                    // Another device is actively using this account!
                     return res.status(200).json({
                         success: false,
                         code: 'SESSION_TERMINATED',
+                        deviceType: currentSession.deviceType || 'Another Device',
                         message: `Logged out: Session was opened on ${currentSession.deviceType || 'another device'}.`
                     });
+                } else {
+                    // Prior session has timed out; take over cleanly
+                    store.active_sessions[sessionKey] = {
+                        deviceId: deviceId,
+                        deviceType: deviceType || 'Device',
+                        lastHeartbeat: now,
+                        loginTime: now
+                    };
+                    await putMasterStore(store);
+                    return res.status(200).json({ success: true });
                 }
             }
 
@@ -175,7 +188,7 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
-            // ACTION 4: SYNC DATA (Surveys, Polygons, Staff Accounts)
+            // ACTION 4: FULL BI-DIRECTIONAL DATA MERGE
             // -------------------------------------------------------------
             // Merge deleted survey IDs
             if (body.deleted_survey_ids && Array.isArray(body.deleted_survey_ids)) {

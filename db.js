@@ -45,7 +45,7 @@ class SurveyDB {
             request.onsuccess = async (event) => {
                 this.db = event.target.result;
                 await this.seedDemoData();
-                this.pullFromCloud().catch(() => {});
+                this.syncCloud().catch(() => {});
                 resolve(this.db);
             };
 
@@ -407,13 +407,51 @@ class SurveyDB {
                 this.logout();
                 if (typeof checkAuthSession === 'function') checkAuthSession();
             }
-        }, 15000);
+        }, 10000);
     }
 
     stopHeartbeat() {
         if (this.heartbeatTimer) {
             clearInterval(this.heartbeatTimer);
             this.heartbeatTimer = null;
+        }
+    }
+
+    async applyCloudData(cloudData) {
+        if (!cloudData) return;
+        try {
+            // 1. Remove deleted surveys locally
+            if (cloudData.deleted_survey_ids && Array.isArray(cloudData.deleted_survey_ids)) {
+                for (const delId of cloudData.deleted_survey_ids) {
+                    await this.delete('pending_surveys', delId);
+                }
+            }
+
+            // 2. Sync Users
+            if (cloudData.users && Array.isArray(cloudData.users)) {
+                for (const u of cloudData.users) {
+                    await this.put('users', u);
+                }
+            }
+
+            // 3. Sync Polygons
+            if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
+                for (const p of cloudData.polygons) {
+                    await this.put('polygons', p);
+                }
+            }
+
+            // 4. Sync Pending Surveys
+            const delSet = new Set(cloudData.deleted_survey_ids || []);
+            if (cloudData.pending_surveys && Array.isArray(cloudData.pending_surveys)) {
+                for (const s of cloudData.pending_surveys) {
+                    if (!delSet.has(s.id)) {
+                        await this.put('pending_surveys', s);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('applyCloudData error:', e.message);
         }
     }
 
@@ -446,42 +484,8 @@ class SurveyDB {
         }
 
         if (cloudData) {
-            try {
-                // 1. Remove deleted surveys locally
-                if (cloudData.deleted_survey_ids && Array.isArray(cloudData.deleted_survey_ids)) {
-                    for (const delId of cloudData.deleted_survey_ids) {
-                        await this.delete('pending_surveys', delId);
-                    }
-                }
-
-                // 2. Sync Users
-                if (cloudData.users && Array.isArray(cloudData.users)) {
-                    for (const u of cloudData.users) {
-                        await this.put('users', u);
-                    }
-                }
-
-                // 3. Sync Polygons
-                if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
-                    for (const p of cloudData.polygons) {
-                        await this.put('polygons', p);
-                    }
-                }
-
-                // 4. Sync Pending Surveys
-                const delSet = new Set(cloudData.deleted_survey_ids || []);
-                if (cloudData.pending_surveys && Array.isArray(cloudData.pending_surveys)) {
-                    for (const s of cloudData.pending_surveys) {
-                        if (!delSet.has(s.id)) {
-                            await this.put('pending_surveys', s);
-                        }
-                    }
-                }
-
-                return true;
-            } catch (e) {
-                console.warn('Cloud local storage write note:', e.message);
-            }
+            await this.applyCloudData(cloudData);
+            return true;
         }
         return false;
     }
@@ -508,53 +512,59 @@ class SurveyDB {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            if (res.ok) success = true;
+            if (res.ok) {
+                const json = await res.json();
+                if (json && json.data) {
+                    await this.applyCloudData(json.data);
+                    return true;
+                }
+            }
         } catch (e) {}
 
-        // Fallback: Direct Cloud Storage Update
-        if (!success) {
-            try {
-                const getRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-                if (getRes.ok) {
-                    const getJson = await getRes.json();
-                    const d = (getJson && getJson.data) ? getJson.data : {};
+        // Fallback: Direct Cloud Storage Update & Merge
+        try {
+            const getRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
+            if (getRes.ok) {
+                const getJson = await getRes.json();
+                const d = (getJson && getJson.data) ? getJson.data : {};
 
-                    // Merge deleted IDs
-                    const delSet = new Set(d.deleted_survey_ids || []);
-                    if (payload.deleted_survey_ids) payload.deleted_survey_ids.forEach(id => delSet.add(id));
-                    d.deleted_survey_ids = Array.from(delSet);
+                // Merge deleted IDs
+                const delSet = new Set(d.deleted_survey_ids || []);
+                if (payload.deleted_survey_ids) payload.deleted_survey_ids.forEach(id => delSet.add(id));
+                d.deleted_survey_ids = Array.from(delSet);
 
-                    // Merge pending surveys
-                    const survMap = new Map();
-                    (d.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
-                    (payload.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
-                    d.pending_surveys = Array.from(survMap.values());
+                // Merge pending surveys
+                const survMap = new Map();
+                (d.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
+                (payload.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
+                d.pending_surveys = Array.from(survMap.values());
 
-                    // Merge users
-                    const userMap = new Map();
-                    (d.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
-                    (payload.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
-                    d.users = Array.from(userMap.values());
+                // Merge users
+                const userMap = new Map();
+                (d.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
+                (payload.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
+                d.users = Array.from(userMap.values());
 
-                    // Merge polygons
-                    const polyMap = new Map();
-                    (d.polygons || []).forEach(p => polyMap.set(p.id, p));
-                    (payload.polygons || []).forEach(p => polyMap.set(p.id, p));
-                    d.polygons = Array.from(polyMap.values());
+                // Merge polygons
+                const polyMap = new Map();
+                (d.polygons || []).forEach(p => polyMap.set(p.id, p));
+                (payload.polygons || []).forEach(p => polyMap.set(p.id, p));
+                d.polygons = Array.from(polyMap.values());
 
-                    d.last_synced = new Date().toISOString();
+                d.last_synced = new Date().toISOString();
 
-                    await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
-                    });
-                    success = true;
-                }
-            } catch (e) {}
-        }
+                await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
+                });
 
-        return success;
+                await this.applyCloudData(d);
+                return true;
+            }
+        } catch (e) {}
+
+        return false;
     }
 
     async createFieldStaff(staffData) {

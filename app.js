@@ -273,7 +273,7 @@ window.handleForceLogin = async function() {
     }
 };
 
-function checkAuthSession() {
+async function checkAuthSession() {
     const user = window.surveyDB.getCurrentUser();
     const loginScreen = document.getElementById('loginScreen');
     const appHeader = document.getElementById('appHeader');
@@ -283,8 +283,43 @@ function checkAuthSession() {
         if (loginScreen) loginScreen.style.display = 'flex';
         if (appHeader) appHeader.style.display = 'none';
         if (mainContainer) mainContainer.style.display = 'none';
+        if (window.surveyDB.stopHeartbeat) window.surveyDB.stopHeartbeat();
         return;
     }
+
+    const sessionKey = user.sessionKey || (user.role === 'DFO' ? `DFO_${user.division.toUpperCase().replace(/[^A-Z0-9]/g, '_')}` : `FO_${user.username.toUpperCase()}`);
+    user.sessionKey = sessionKey;
+
+    // Check cloud if another device is currently active
+    if (navigator.onLine && window.surveyDB.sendHeartbeat) {
+        try {
+            const hb = await window.surveyDB.sendHeartbeat(sessionKey);
+            if (hb && hb.code === 'SESSION_TERMINATED') {
+                alert(`Access Restricted: This ${user.role} portal is currently active on ${hb.deviceType || 'another device'}. You have been logged out on this device.`);
+                await window.surveyDB.logout();
+                if (loginScreen) loginScreen.style.display = 'flex';
+                if (appHeader) appHeader.style.display = 'none';
+                if (mainContainer) mainContainer.style.display = 'none';
+                const errBox = document.getElementById('loginError');
+                if (errBox) {
+                    errBox.innerHTML = `
+                        <div class="session-blocked-notice">
+                            <div class="blocked-title"><i class="fa-solid fa-triangle-exclamation"></i> ACCESS RESTRICTED: Already Logged In</div>
+                            <div class="blocked-desc">This portal is currently active on <b>${hb.deviceType || 'another device'}</b>.<br>Only 1 active login is allowed at a time.</div>
+                            <button type="button" class="btn-force-takeover" onclick="handleForceLogin()">
+                                <i class="fa-solid fa-right-to-bracket"></i> Force Logout ${hb.deviceType || 'other device'} &amp; Login Here
+                            </button>
+                        </div>
+                    `;
+                    errBox.style.display = 'block';
+                }
+                return;
+            }
+        } catch (e) {}
+    }
+
+    // Session is valid for this device: start continuous heartbeat
+    if (window.surveyDB.startHeartbeat) window.surveyDB.startHeartbeat(sessionKey);
 
     if (loginScreen) loginScreen.style.display = 'none';
     if (appHeader) appHeader.style.display = 'flex';
@@ -341,6 +376,22 @@ if (logoutBtnHeader) {
 // PWA INSTALLATION PROMPT HANDLER (One-Tap Install for Android & Mobile)
 // -------------------------------------------------------------------------
 let deferredInstallPrompt = null;
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        const u = window.surveyDB.getCurrentUser();
+        if (u && u.sessionKey) {
+            window.surveyDB.sendHeartbeat(u.sessionKey).then(res => {
+                if (res && res.code === 'SESSION_TERMINATED') {
+                    alert(`Logged out: Account was accessed from ${res.deviceType || 'another device'}.`);
+                    window.surveyDB.logout();
+                    checkAuthSession();
+                }
+            });
+        }
+    }
+});
+
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredInstallPrompt = e;
@@ -372,7 +423,7 @@ function closeInstallGuideModal() {
 // -------------------------------------------------------------------------
 async function setupDfoPortal() {
     if (navigator.onLine && window.surveyDB.pullFromCloud) {
-        await window.surveyDB.pullFromCloud().catch(() => {});
+        await window.surveyDB.syncCloud().catch(() => {});
     }
     document.getElementById('dfoPanel').style.display = 'block';
     if (!window.dfoAutoSyncTimer) {
@@ -792,7 +843,7 @@ window.manualSyncSubmissions = async function() {
     if (icon) icon.classList.add('fa-spin');
     try {
         if (window.surveyDB.pullFromCloud) {
-            await window.surveyDB.pullFromCloud();
+            await window.surveyDB.syncCloud();
         }
         await loadPendingFieldSurveys();
     } finally {
@@ -804,7 +855,7 @@ window.manualSyncSubmissions = async function() {
 
 async function loadPendingFieldSurveys() {
     if (navigator.onLine && window.surveyDB.pullFromCloud) {
-        await window.surveyDB.pullFromCloud().catch(() => {});
+        await window.surveyDB.syncCloud().catch(() => {});
     }
     const all = await window.surveyDB.getAll('pending_surveys');
     const divisionSurveys = all.filter(s => s.division.toLowerCase() === currentDivision.toLowerCase());
