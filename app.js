@@ -368,21 +368,27 @@ async function checkAuthSession() {
 }
 
 let isLoggingOut = false;
-async function handleLogout() {
+async function handleLogout(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (e && e.stopPropagation) e.stopPropagation();
     if (isLoggingOut) return;
-    if (!confirm('Are you sure you want to log out of the portal?')) return;
     isLoggingOut = true;
+
     try {
         if (window.surveyDB && window.surveyDB.logout) {
             await window.surveyDB.logout();
         }
-        await checkAuthSession();
-    } catch (e) {
-        console.warn('Logout note:', e);
-        window.location.reload();
-    } finally {
-        setTimeout(() => { isLoggingOut = false; }, 1200);
+    } catch (err) {
+        console.warn('Logout cleanup:', err);
     }
+
+    localStorage.removeItem('tn_forest_survey_session_v4');
+    if (typeof checkAuthSession === 'function') {
+        checkAuthSession();
+    } else {
+        window.location.reload();
+    }
+    setTimeout(() => { isLoggingOut = false; }, 1500);
 }
 window.handleLogout = handleLogout;
 
@@ -532,7 +538,7 @@ async function loadDfoActiveBoundary() {
     document.getElementById('dfoDetVertices').textContent = currentBoundaryData.coordinates.length;
     document.getElementById('activeMapInfo').textContent = `${currentBoundaryData.name} (${currentDivision})`;
 
-    renderActiveBoundary();
+    renderActiveBoundary(true);
     
     // Auto-select first vertex
     if (currentBoundaryData.coordinates.length > 0) {
@@ -540,7 +546,7 @@ async function loadDfoActiveBoundary() {
     }
 }
 
-function renderActiveBoundary() {
+function renderActiveBoundary(shouldFitBounds = false) {
     if (activePolygonLayer) map.removeLayer(activePolygonLayer);
     vertexMarkersGroup.clearLayers();
 
@@ -561,7 +567,9 @@ function renderActiveBoundary() {
         fillOpacity: 0.18
     }).addTo(map);
 
-    map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    if (shouldFitBounds) {
+        map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    }
 
     // Click on boundary line to insert intermediate sub-point (e.g. 6a, 6b...)
     activePolygonLayer.on('click', async (e) => {
@@ -580,13 +588,15 @@ function renderActiveBoundary() {
             }
         }
 
-        coords.splice(insertIdx, 0, [e.latlng.lng, e.latlng.lat]);
+        const newPt = [Number(e.latlng.lng.toFixed(10)), Number(e.latlng.lat.toFixed(10))];
+        coords.splice(insertIdx, 0, newPt);
         // Auto-flag newly inserted sub-point for field verification
         currentBoundaryData.flaggedVertices = currentBoundaryData.flaggedVertices.map(f => f >= insertIdx ? f + 1 : f);
         currentBoundaryData.flaggedVertices.push(insertIdx);
 
         await window.surveyDB.put('polygons', currentBoundaryData);
-        renderActiveBoundary();
+        window.surveyDB.syncCloud().catch(() => {});
+        renderActiveBoundary(false);
         selectActiveVertex(insertIdx);
         alert(`New boundary sub-point added between cairns! Flagged for field ground verification.`);
     });
@@ -609,22 +619,25 @@ function renderActiveBoundary() {
             selectActiveVertex(idx);
         });
 
-        // Update coordinate input fields in real-time while dragging
+        // Update coordinate input fields in real-time while dragging (10 decimal precision)
         m.on('drag', (e) => {
             const pos = e.target.getLatLng();
+            currentBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
+            activePolygonLayer.setLatLngs(currentBoundaryData.coordinates.map(pt => [pt[1], pt[0]]));
             const latInp = document.getElementById('editVertexLatInput');
             const lonInp = document.getElementById('editVertexLonInput');
             if (selectedVertexIndex === idx) {
-                if (latInp) latInp.value = pos.lat.toFixed(6);
-                if (lonInp) lonInp.value = pos.lng.toFixed(6);
+                if (latInp) latInp.value = pos.lat.toFixed(10);
+                if (lonInp) lonInp.value = pos.lng.toFixed(10);
             }
         });
 
         m.on('dragend', async (e) => {
             const pos = e.target.getLatLng();
-            currentBoundaryData.coordinates[idx] = [pos.lng, pos.lat];
+            currentBoundaryData.coordinates[idx] = [Number(pos.lng.toFixed(10)), Number(pos.lat.toFixed(10))];
             await window.surveyDB.put('polygons', currentBoundaryData);
-            renderActiveBoundary();
+            window.surveyDB.syncCloud().catch(() => {});
+            renderActiveBoundary(false); // DO NOT ZOOM OUT - KEEP CURRENT ZOOM
             selectActiveVertex(idx);
         });
     });
@@ -697,31 +710,52 @@ async function saveTypedVertexCoordinates() {
         return;
     }
 
-    currentBoundaryData.coordinates[selectedVertexIndex] = [lon, lat];
+    currentBoundaryData.coordinates[selectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
     await window.surveyDB.put('polygons', currentBoundaryData);
-    renderActiveBoundary();
+    window.surveyDB.syncCloud().catch(() => {});
+    renderActiveBoundary(false); // KEEP CURRENT ZOOM
     selectActiveVertex(selectedVertexIndex);
     map.panTo([lat, lon]);
     alert(`Point #${selectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${format10Dec(lat)}\nLongitude: ${format10Dec(lon)}`);
 }
 
-// Snap active vertex to officer's standing GPS location
+// Snap active vertex to officer's standing GPS location (Immediate High-Precision Fix)
 async function snapActiveVertexToLiveGps() {
     if (selectedVertexIndex === null || !currentBoundaryData) return;
-    if (!liveGpsLocation) {
-        alert('Waiting for GPS fix... Please ensure device GPS is turned ON and stand near the cairn.');
+
+    const applyCoords = async (lat, lon) => {
+        currentBoundaryData.coordinates[selectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+        // Remove red action flag since ground point has now been verified
+        currentBoundaryData.flaggedVertices = (currentBoundaryData.flaggedVertices || []).filter(f => f !== selectedVertexIndex);
+        await window.surveyDB.put('polygons', currentBoundaryData);
+        window.surveyDB.syncCloud().catch(() => {});
+        renderActiveBoundary(false); // DO NOT ZOOM OUT
+        selectActiveVertex(selectedVertexIndex);
+        alert(`Point #${selectedVertexIndex + 1} snapped to your live GPS coordinates!\nLatitude: ${format10Dec(lat)}\nLongitude: ${format10Dec(lon)}`);
+    };
+
+    if (liveGpsLocation && liveGpsLocation.lat && liveGpsLocation.lon) {
+        await applyCoords(liveGpsLocation.lat, liveGpsLocation.lon);
         return;
     }
 
-    currentBoundaryData.coordinates[selectedVertexIndex] = [liveGpsLocation.lon, liveGpsLocation.lat];
+    if (!('geolocation' in navigator)) {
+        alert('Geolocation is not supported by your browser/device.');
+        return;
+    }
 
-    // Remove red action flag since ground point has now been verified
-    currentBoundaryData.flaggedVertices = currentBoundaryData.flaggedVertices.filter(f => f !== selectedVertexIndex);
-
-    await window.surveyDB.put('polygons', currentBoundaryData);
-    renderActiveBoundary();
-    selectActiveVertex(selectedVertexIndex);
-    alert(`Point #${selectedVertexIndex + 1} snapped to your live GPS coordinates! Flag cleared.`);
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+            liveGpsLocation = { lat, lon, accuracy: pos.coords.accuracy };
+            await applyCoords(lat, lon);
+        },
+        (err) => {
+            alert(`GPS Error: ${err.message}. Please enable GPS and allow location access.`);
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
 }
 
 // Toggle Red Action Flag on active vertex
@@ -740,7 +774,8 @@ async function toggleActiveVertexFlag() {
     }
 
     await window.surveyDB.put('polygons', currentBoundaryData);
-    renderActiveBoundary();
+    window.surveyDB.syncCloud().catch(() => {});
+    renderActiveBoundary(false);
     selectActiveVertex(selectedVertexIndex);
 }
 
@@ -773,7 +808,8 @@ async function deleteSelectedActiveVertex() {
     selectedVertexIndex = null;
 
     await window.surveyDB.put('polygons', currentBoundaryData);
-    renderActiveBoundary();
+    window.surveyDB.syncCloud().catch(() => {});
+    renderActiveBoundary(false);
     alert(`Point #${ptNum} deleted successfully from boundary.`);
 }
 
@@ -1301,11 +1337,11 @@ window.loadFieldBoundaryForEditing = async function() {
     const areaHa = (turf.area(turfPoly) / 10000).toFixed(2);
     document.getElementById('fieldRfArea').textContent = `${areaHa} Ha`;
 
-    renderFieldActiveBoundary();
+    renderFieldActiveBoundary(true);
     selectFieldVertex(0);
 };
 
-window.renderFieldActiveBoundary = function() {
+window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
     if (!fieldActiveBoundaryData || !fieldActiveBoundaryData.coordinates) return;
 
     if (activePolygonLayer) map.removeLayer(activePolygonLayer);
@@ -1321,7 +1357,9 @@ window.renderFieldActiveBoundary = function() {
         fillOpacity: 0.25
     }).addTo(map);
 
-    map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    if (shouldFitBounds) {
+        map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    }
 
     // Render Draggable, Clickable Cairn Markers
     fieldActiveBoundaryData.coordinates.forEach((c, idx) => {
@@ -1355,7 +1393,7 @@ window.renderFieldActiveBoundary = function() {
         });
 
         marker.on('dragend', () => {
-            renderFieldActiveBoundary();
+            renderFieldActiveBoundary(false); // DO NOT ZOOM OUT - KEEP CURRENT ZOOM
             selectFieldVertex(idx);
         });
     });
@@ -1379,7 +1417,7 @@ window.renderFieldActiveBoundary = function() {
 
         const newCoord = [Number(e.latlng.lng.toFixed(10)), Number(e.latlng.lat.toFixed(10))];
         coords.splice(bestIndex, 0, newCoord);
-        renderFieldActiveBoundary();
+        renderFieldActiveBoundary(false); // DO NOT ZOOM OUT
         selectFieldVertex(bestIndex);
         alert(`Inserted new boundary cairn #${bestIndex + 1}! You can drag it or type exact 10-decimal coordinates.`);
     });
@@ -1409,7 +1447,7 @@ window.saveFieldVertexCoords = function() {
     }
 
     fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
-    renderFieldActiveBoundary();
+    renderFieldActiveBoundary(false); // DO NOT ZOOM OUT
     selectFieldVertex(fieldSelectedVertexIndex);
     alert(`Cairn #${fieldSelectedVertexIndex + 1} coordinates fixed & updated to:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
 };
@@ -1417,18 +1455,20 @@ window.saveFieldVertexCoords = function() {
 window.snapFieldVertexToStandingGps = function() {
     if (!fieldActiveBoundaryData) return;
 
-    if (liveGpsPosition && liveGpsPosition.latitude) {
-        const lat = liveGpsPosition.latitude;
-        const lon = liveGpsPosition.longitude;
+    const applyCoords = (lat, lon) => {
         fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
-        renderFieldActiveBoundary();
+        renderFieldActiveBoundary(false); // DO NOT ZOOM OUT - KEEP MAP EXACTLY AS ZOOMED
         selectFieldVertex(fieldSelectedVertexIndex);
-        alert(`Point #${fieldSelectedVertexIndex + 1} snapped to standing GPS:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+        alert(`Point #${fieldSelectedVertexIndex + 1} snapped to your standing GPS location!\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+    };
+
+    if (liveGpsLocation && liveGpsLocation.lat && liveGpsLocation.lon) {
+        applyCoords(liveGpsLocation.lat, liveGpsLocation.lon);
         return;
     }
 
     if (!('geolocation' in navigator)) {
-        alert('Geolocation is not supported by your browser.');
+        alert('Geolocation is not supported by your browser/device.');
         return;
     }
 
@@ -1436,13 +1476,11 @@ window.snapFieldVertexToStandingGps = function() {
         (pos) => {
             const lat = pos.coords.latitude;
             const lon = pos.coords.longitude;
-            fieldActiveBoundaryData.coordinates[fieldSelectedVertexIndex] = [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
-            renderFieldActiveBoundary();
-            selectFieldVertex(fieldSelectedVertexIndex);
-            alert(`Point #${fieldSelectedVertexIndex + 1} snapped to live GPS:\nLatitude: ${lat.toFixed(10)}\nLongitude: ${lon.toFixed(10)}`);
+            liveGpsLocation = { lat, lon, accuracy: pos.coords.accuracy };
+            applyCoords(lat, lon);
         },
-        (err) => alert(`GPS Error: ${err.message}`),
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        (err) => alert(`GPS Error: ${err.message}. Please enable GPS and allow location access on your mobile device.`),
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
 };
 
@@ -1456,7 +1494,7 @@ window.deleteFieldSelectedVertex = function() {
     if (confirm(`Delete Point #${fieldSelectedVertexIndex + 1} from "${fieldActiveBoundaryData.name}"?`)) {
         fieldActiveBoundaryData.coordinates.splice(fieldSelectedVertexIndex, 1);
         fieldSelectedVertexIndex = Math.max(0, fieldSelectedVertexIndex - 1);
-        renderFieldActiveBoundary();
+        renderFieldActiveBoundary(false); // DO NOT ZOOM OUT
         selectFieldVertex(fieldSelectedVertexIndex);
     }
 };

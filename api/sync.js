@@ -1,56 +1,95 @@
 // api/sync.js - Universal Master Cloud Sync Engine for ALL 51 TN Forest Divisions
-// Persistent Cloud Database for Boundaries, Field Officer Accounts, RF Edits & Sessions
+// Ultra-Reliable High-Speed Persistent Cloud Database for Boundaries, Staff, Revisions & Sessions
 
-const CLOUD_STORAGE_URL = 'https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157';
+const JSTASH_READ_URL = 'https://j.jstash.app/Himsc1yr2Ug6G6pQkGUv3w';
+const JSTASH_PUT_URL = 'https://api.jstash.app/v1/bins/Himsc1yr2Ug6G6pQkGUv3w';
+const JSTASH_TOKEN = 'Bearer js_edit_7uPwJl6a1zEgoxLXTBZzjHvX0-pzP6y6YoTZenDW9hA';
+const NTFY_BACKUP_URL = 'https://ntfy.sh/tn_forest_rfrl_survey_topic_991283';
+
+let memoryStore = null;
 
 const DEFAULT_STORE = {
-    users: [],
+    users: [
+        {
+            username: 'shashank',
+            password: 'shashank@123',
+            name: 'Shashank',
+            role: 'FIELD_OFFICER',
+            division: 'Ranipet',
+            range: 'Ranipet Range'
+        },
+        {
+            username: 'fo_abhishek',
+            password: 'fo_abhishek@123',
+            name: 'FO_ABHISHEK',
+            role: 'FIELD_OFFICER',
+            division: 'Pudukkottai',
+            range: 'Pudukkottai Range'
+        }
+    ],
     polygons: [],
     pending_surveys: [],
     deleted_survey_ids: [],
     deleted_polygon_ids: [],
+    deleted_user_ids: [],
     active_sessions: {},
     last_synced: new Date().toISOString()
 };
 
 async function fetchMasterStore() {
     try {
-        const res = await fetch(CLOUD_STORAGE_URL, { cache: 'no-store' });
+        const res = await fetch(JSTASH_READ_URL, { cache: 'no-store' });
         if (res.ok) {
-            const json = await res.json();
-            if (json && json.data) {
-                const d = json.data;
-                return {
-                    users: Array.isArray(d.users) ? d.users : [],
-                    polygons: Array.isArray(d.polygons) ? d.polygons : [],
-                    pending_surveys: Array.isArray(d.pending_surveys) ? d.pending_surveys : [],
+            const d = await res.json();
+            if (d && typeof d === 'object') {
+                const store = {
+                    users: Array.isArray(d.users) ? d.users : (memoryStore ? memoryStore.users : DEFAULT_STORE.users),
+                    polygons: Array.isArray(d.polygons) ? d.polygons : (memoryStore ? memoryStore.polygons : []),
+                    pending_surveys: Array.isArray(d.pending_surveys) ? d.pending_surveys : (memoryStore ? memoryStore.pending_surveys : []),
                     deleted_survey_ids: Array.isArray(d.deleted_survey_ids) ? d.deleted_survey_ids : [],
                     deleted_polygon_ids: Array.isArray(d.deleted_polygon_ids) ? d.deleted_polygon_ids : [],
+                    deleted_user_ids: Array.isArray(d.deleted_user_ids) ? d.deleted_user_ids : [],
                     active_sessions: (typeof d.active_sessions === 'object' && d.active_sessions !== null) ? d.active_sessions : {},
                     last_synced: d.last_synced || new Date().toISOString()
                 };
+                memoryStore = store;
+                return store;
             }
         }
     } catch (e) {
-        console.error('Error reading from cloud store:', e.message);
+        console.error('Error fetching master store:', e.message);
     }
+
+    if (memoryStore) return memoryStore;
     return JSON.parse(JSON.stringify(DEFAULT_STORE));
 }
 
 async function putMasterStore(data) {
     try {
         data.last_synced = new Date().toISOString();
-        const res = await fetch(CLOUD_STORAGE_URL, {
+        memoryStore = data;
+
+        const payloadStr = JSON.stringify(data);
+
+        // Primary: Update jstash master bin
+        const res = await fetch(JSTASH_PUT_URL, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                name: 'TN_Forest_RFRL_Survey_Master',
-                data: data
-            })
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': JSTASH_TOKEN
+            },
+            body: payloadStr
         });
+
+        // Background secondary backup to ntfy.sh (fire and forget)
+        fetch(NTFY_BACKUP_URL, {
+            method: 'POST',
+            body: payloadStr
+        }).catch(() => {});
+
         return res.ok;
     } catch (e) {
-        console.error('Error writing to cloud store:', e.message);
+        console.error('Error saving master store:', e.message);
         return false;
     }
 }
@@ -60,7 +99,7 @@ module.exports = async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization');
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
 
     if (req.method === 'OPTIONS') {
@@ -83,7 +122,7 @@ module.exports = async function handler(req, res) {
             const action = body.action || 'sync_data';
             const store = await fetchMasterStore();
             const now = Date.now();
-            const SESSION_TIMEOUT_MS = 120000; // 2 minutes active session timeout
+            const SESSION_TIMEOUT_MS = 60000; // 60 seconds heartbeat timeout
 
             // -------------------------------------------------------------
             // ACTION 1: ACQUIRE EXCLUSIVE SESSION (Single Login Enforcement)
@@ -193,6 +232,13 @@ module.exports = async function handler(req, res) {
                 store.deleted_polygon_ids = Array.from(delPolySet);
             }
 
+            // 2b. Merge deleted user IDs
+            if (body.deleted_user_ids && Array.isArray(body.deleted_user_ids)) {
+                const delUserSet = new Set(store.deleted_user_ids || []);
+                body.deleted_user_ids.forEach(u => delUserSet.add(u.toLowerCase()));
+                store.deleted_user_ids = Array.from(delUserSet);
+            }
+
             // 3. Merge pending surveys (filtering out deleted ones)
             const delSurvSet = new Set(store.deleted_survey_ids || []);
             const survMap = new Map();
@@ -224,11 +270,16 @@ module.exports = async function handler(req, res) {
             store.polygons = Array.from(polyMap.values());
 
             // 5. Merge users for ALL divisions & ranges uniquely by username
+            const delUserSet = new Set(store.deleted_user_ids || []);
             const userMap = new Map();
-            (store.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
+            (store.users || []).forEach(u => {
+                if (u && u.username && !delUserSet.has(u.username.toLowerCase())) {
+                    userMap.set(u.username.toLowerCase(), u);
+                }
+            });
             if (body.users && Array.isArray(body.users)) {
                 body.users.forEach(u => {
-                    if (u && u.username) {
+                    if (u && u.username && !delUserSet.has(u.username.toLowerCase())) {
                         userMap.set(u.username.toLowerCase(), u);
                     }
                 });
@@ -247,6 +298,4 @@ module.exports = async function handler(req, res) {
             return res.status(500).json({ success: false, error: err.message });
         }
     }
-
-    return res.status(405).json({ error: 'Method not allowed' });
-}
+};

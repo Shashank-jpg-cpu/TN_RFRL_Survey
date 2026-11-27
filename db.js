@@ -257,14 +257,54 @@ class SurveyDB {
         return isMobile ? 'Mobile Phone' : 'Desktop Computer';
     }
 
+    getApiUrl() {
+        if (typeof window !== 'undefined' && window.location && window.location.origin) {
+            const org = window.location.origin;
+            if (org.startsWith('http') && !org.includes('localhost') && !org.includes('127.0.0.1')) {
+                return '/api/sync';
+            }
+        }
+        return 'https://tnrfrlsurvey.vercel.app/api/sync';
+    }
+
+    async fetchDirectCloud() {
+        try {
+            const res = await fetch('https://j.jstash.app/Himsc1yr2Ug6G6pQkGUv3w', { cache: 'no-store' });
+            if (res.ok) {
+                return await res.json();
+            }
+        } catch (e) {
+            console.warn('fetchDirectCloud error:', e.message);
+        }
+        return null;
+    }
+
+    async putDirectCloud(data) {
+        try {
+            data.last_synced = new Date().toISOString();
+            const res = await fetch('https://api.jstash.app/v1/bins/Himsc1yr2Ug6G6pQkGUv3w', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer js_edit_7uPwJl6a1zEgoxLXTBZzjHvX0-pzP6y6YoTZenDW9hA'
+                },
+                body: JSON.stringify(data)
+            });
+            return res.ok;
+        } catch (e) {
+            console.warn('putDirectCloud error:', e.message);
+            return false;
+        }
+    }
+
     async acquireSession(sessionKey, force = false) {
         if (!navigator.onLine) return { success: true };
         const deviceId = this.getDeviceId();
         const deviceType = this.getDeviceType();
 
-        // Try primary /api/sync
+        // 1. Primary: Serverless API Sync
         try {
-            const res = await fetch('/api/sync', {
+            const res = await fetch(this.getApiUrl(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -280,34 +320,26 @@ class SurveyDB {
             }
         } catch (e) {}
 
-        // Fallback: Direct Persistent Cloud Storage
+        // 2. Direct Cloud Storage Fallback
         try {
-            const fbRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-            if (fbRes.ok) {
-                const fbJson = await fbRes.json();
-                const d = fbJson.data || {};
-                const active = d.active_sessions || {};
-                const now = Date.now();
-                const current = active[sessionKey];
+            const d = await this.fetchDirectCloud() || {};
+            const active = d.active_sessions || {};
+            const now = Date.now();
+            const current = active[sessionKey];
 
-                if (current && current.deviceId !== deviceId && (now - (current.lastHeartbeat || 0) < 45000) && !force) {
-                    return {
-                        success: false,
-                        code: 'ALREADY_LOGGED_IN',
-                        deviceType: current.deviceType || 'Another Device',
-                        message: `Access Blocked: This portal is currently active on ${current.deviceType || 'another device'}. Only 1 active login is allowed at a time.`
-                    };
-                }
-
-                active[sessionKey] = { deviceId, deviceType, lastHeartbeat: now, loginTime: now };
-                d.active_sessions = active;
-                await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
-                });
-                return { success: true, message: 'Exclusive session acquired' };
+            if (current && current.deviceId !== deviceId && (now - (current.lastHeartbeat || 0) < 60000) && !force) {
+                return {
+                    success: false,
+                    code: 'ALREADY_LOGGED_IN',
+                    deviceType: current.deviceType || 'Another Device',
+                    message: `Access Blocked: This portal is currently active on ${current.deviceType || 'another device'}. Only 1 active login is allowed at a time.`
+                };
             }
+
+            active[sessionKey] = { deviceId, deviceType, lastHeartbeat: now, loginTime: now };
+            d.active_sessions = active;
+            await this.putDirectCloud(d);
+            return { success: true, message: 'Exclusive session acquired' };
         } catch (e) {}
 
         return { success: true };
@@ -319,7 +351,7 @@ class SurveyDB {
         const deviceType = this.getDeviceType();
 
         try {
-            const res = await fetch('/api/sync', {
+            const res = await fetch(this.getApiUrl(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -334,28 +366,25 @@ class SurveyDB {
             }
         } catch (e) {}
 
-        // Fallback: Direct Cloud Storage
+        // Direct Cloud Storage Fallback
         try {
-            const fbRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-            if (fbRes.ok) {
-                const fbJson = await fbRes.json();
-                const d = fbJson.data || {};
-                const active = d.active_sessions || {};
-                const current = active[sessionKey];
-                const now = Date.now();
+            const d = await this.fetchDirectCloud() || {};
+            const active = d.active_sessions || {};
+            const current = active[sessionKey];
+            const now = Date.now();
 
-                if (!current || current.deviceId === deviceId) {
-                    active[sessionKey] = { deviceId, deviceType, lastHeartbeat: now };
-                    d.active_sessions = active;
-                    await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
-                    });
-                    return { success: true };
-                } else {
-                    return { success: false, code: 'SESSION_TERMINATED', deviceType: current.deviceType };
-                }
+            if (!current || current.deviceId === deviceId) {
+                active[sessionKey] = { deviceId, deviceType, lastHeartbeat: now };
+                d.active_sessions = active;
+                await this.putDirectCloud(d);
+                return { success: true };
+            } else if (now - (current.lastHeartbeat || 0) < 60000) {
+                return { success: false, code: 'SESSION_TERMINATED', deviceType: current.deviceType || 'Another Device' };
+            } else {
+                active[sessionKey] = { deviceId, deviceType, lastHeartbeat: now };
+                d.active_sessions = active;
+                await this.putDirectCloud(d);
+                return { success: true };
             }
         } catch (e) {}
 
@@ -367,7 +396,7 @@ class SurveyDB {
         const deviceId = this.getDeviceId();
 
         try {
-            await fetch('/api/sync', {
+            await fetch(this.getApiUrl(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -378,19 +407,12 @@ class SurveyDB {
             });
         } catch (e) {}
 
-        // Fallback release direct
         try {
-            const fbRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-            if (fbRes.ok) {
-                const fbJson = await fbRes.json();
-                const d = fbJson.data || {};
-                if (d.active_sessions && d.active_sessions[sessionKey] && d.active_sessions[sessionKey].deviceId === deviceId) {
+            const d = await this.fetchDirectCloud();
+            if (d && d.active_sessions && d.active_sessions[sessionKey]) {
+                if (!deviceId || d.active_sessions[sessionKey].deviceId === deviceId) {
                     delete d.active_sessions[sessionKey];
-                    await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
-                    });
+                    await this.putDirectCloud(d);
                 }
             }
         } catch (e) {}
@@ -434,17 +456,30 @@ class SurveyDB {
                 }
             }
 
+            // 1c. Remove deleted users locally
+            if (cloudData.deleted_user_ids && Array.isArray(cloudData.deleted_user_ids)) {
+                for (const delUserId of cloudData.deleted_user_ids) {
+                    await this.delete('users', delUserId);
+                }
+            }
+
             // 2. Sync Users
             if (cloudData.users && Array.isArray(cloudData.users)) {
+                const delUsers = new Set((cloudData.deleted_user_ids || []).map(u => u.toLowerCase()));
                 for (const u of cloudData.users) {
-                    await this.put('users', u);
+                    if (u && u.username && !delUsers.has(u.username.toLowerCase())) {
+                        await this.put('users', u);
+                    }
                 }
             }
 
             // 3. Sync Polygons
             if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
+                const delPolys = new Set(cloudData.deleted_polygon_ids || []);
                 for (const p of cloudData.polygons) {
-                    await this.put('polygons', p);
+                    if (p && p.id && !delPolys.has(p.id)) {
+                        await this.put('polygons', p);
+                    }
                 }
             }
 
@@ -452,7 +487,7 @@ class SurveyDB {
             const delSet = new Set(cloudData.deleted_survey_ids || []);
             if (cloudData.pending_surveys && Array.isArray(cloudData.pending_surveys)) {
                 for (const s of cloudData.pending_surveys) {
-                    if (!delSet.has(s.id)) {
+                    if (s && s.id && !delSet.has(s.id)) {
                         await this.put('pending_surveys', s);
                     }
                 }
@@ -468,7 +503,7 @@ class SurveyDB {
 
         // Try primary /api/sync
         try {
-            const res = await fetch('/api/sync', { method: 'GET', cache: 'no-store' });
+            const res = await fetch(this.getApiUrl(), { method: 'GET', cache: 'no-store' });
             if (res.ok) {
                 const json = await res.json();
                 if (json && json.success && json.data) {
@@ -479,15 +514,7 @@ class SurveyDB {
 
         // Fallback: Direct Persistent Cloud Storage
         if (!cloudData) {
-            try {
-                const fbRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-                if (fbRes.ok) {
-                    const fbJson = await fbRes.json();
-                    if (fbJson && fbJson.data) {
-                        cloudData = fbJson.data;
-                    }
-                }
-            } catch (e) {}
+            cloudData = await this.fetchDirectCloud();
         }
 
         if (cloudData) {
@@ -499,7 +526,6 @@ class SurveyDB {
 
     async syncCloud(options = {}) {
         if (!navigator.onLine) return false;
-        let success = false;
         const users = await this.getAll('users');
         const polygons = await this.getAll('polygons');
         const pending_surveys = await this.getAll('pending_surveys');
@@ -510,12 +536,13 @@ class SurveyDB {
             polygons: polygons,
             pending_surveys: pending_surveys,
             deleted_survey_ids: options.deletedSurveyId ? [options.deletedSurveyId] : [],
-            deleted_polygon_ids: options.deletedPolygonId ? [options.deletedPolygonId] : []
+            deleted_polygon_ids: options.deletedPolygonId ? [options.deletedPolygonId] : [],
+            deleted_user_ids: options.deletedUserId ? [options.deletedUserId] : []
         };
 
-        // Try primary /api/sync
+        // Try primary API sync
         try {
-            const res = await fetch('/api/sync', {
+            const res = await fetch(this.getApiUrl(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -531,45 +558,44 @@ class SurveyDB {
 
         // Fallback: Direct Cloud Storage Update & Merge
         try {
-            const getRes = await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', { cache: 'no-store' });
-            if (getRes.ok) {
-                const getJson = await getRes.json();
-                const d = (getJson && getJson.data) ? getJson.data : {};
+            const d = await this.fetchDirectCloud() || {};
 
-                // Merge deleted IDs
-                const delSet = new Set(d.deleted_survey_ids || []);
-                if (payload.deleted_survey_ids) payload.deleted_survey_ids.forEach(id => delSet.add(id));
-                d.deleted_survey_ids = Array.from(delSet);
+            // Merge deleted IDs
+            const delSet = new Set(d.deleted_survey_ids || []);
+            if (payload.deleted_survey_ids) payload.deleted_survey_ids.forEach(id => delSet.add(id));
+            d.deleted_survey_ids = Array.from(delSet);
 
-                // Merge pending surveys
-                const survMap = new Map();
-                (d.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
-                (payload.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
-                d.pending_surveys = Array.from(survMap.values());
+            const delPolySet = new Set(d.deleted_polygon_ids || []);
+            if (payload.deleted_polygon_ids) payload.deleted_polygon_ids.forEach(id => delPolySet.add(id));
+            d.deleted_polygon_ids = Array.from(delPolySet);
 
-                // Merge users
-                const userMap = new Map();
-                (d.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
-                (payload.users || []).forEach(u => userMap.set(u.username.toLowerCase(), u));
-                d.users = Array.from(userMap.values());
+            const delUserSet = new Set(d.deleted_user_ids || []);
+            if (payload.deleted_user_ids) payload.deleted_user_ids.forEach(id => delUserSet.add(id.toLowerCase()));
+            d.deleted_user_ids = Array.from(delUserSet);
 
-                // Merge polygons
-                const polyMap = new Map();
-                (d.polygons || []).forEach(p => polyMap.set(p.id, p));
-                (payload.polygons || []).forEach(p => polyMap.set(p.id, p));
-                d.polygons = Array.from(polyMap.values());
+            // Merge pending surveys
+            const survMap = new Map();
+            (d.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
+            (payload.pending_surveys || []).forEach(s => { if (s && s.id && !delSet.has(s.id)) survMap.set(s.id, s); });
+            d.pending_surveys = Array.from(survMap.values());
 
-                d.last_synced = new Date().toISOString();
+            // Merge users
+            const userMap = new Map();
+            (d.users || []).forEach(u => { if (u && u.username && !delUserSet.has(u.username.toLowerCase())) userMap.set(u.username.toLowerCase(), u); });
+            (payload.users || []).forEach(u => { if (u && u.username && !delUserSet.has(u.username.toLowerCase())) userMap.set(u.username.toLowerCase(), u); });
+            d.users = Array.from(userMap.values());
 
-                await fetch('https://api.restful-api.dev/objects/ff808181a09d98f701a21c1ecc086157', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: 'TN_Forest_RFRL_Survey_Master', data: d })
-                });
+            // Merge polygons
+            const polyMap = new Map();
+            (d.polygons || []).forEach(p => { if (p && p.id && !delPolySet.has(p.id)) polyMap.set(p.id, p); });
+            (payload.polygons || []).forEach(p => { if (p && p.id && !delPolySet.has(p.id)) polyMap.set(p.id, p); });
+            d.polygons = Array.from(polyMap.values());
 
-                await this.applyCloudData(d);
-                return true;
-            }
+            d.last_synced = new Date().toISOString();
+
+            await this.putDirectCloud(d);
+            await this.applyCloudData(d);
+            return true;
         } catch (e) {}
 
         return false;
@@ -605,7 +631,11 @@ class SurveyDB {
     }
 
     async deleteFieldStaff(username) {
-        return this.delete('users', username);
+        await this.delete('users', username);
+        if (navigator.onLine) {
+            await this.syncCloud({ deletedUserId: username }).catch(() => {});
+        }
+        return true;
     }
 
     // -------------------------------------------------------------------------
@@ -660,14 +690,23 @@ class SurveyDB {
                 try { await this.syncCloud(); } catch(e) {}
             }
 
+            const cleanRange = range ? range.toLowerCase().replace(/\s+range$/i, '').trim() : '';
             const allUsers = await this.getAll('users');
-            let user = allUsers.find(u =>
-                u.role === 'FIELD_OFFICER' &&
-                u.division.toLowerCase() === division.toLowerCase() &&
-                u.range.toLowerCase() === range.toLowerCase() &&
-                u.username.toLowerCase() === cleanUser &&
-                (u.password === cleanPass || cleanPass === 'field@123' || cleanPass === `${cleanUser}@123`)
-            );
+            let user = allUsers.find(u => {
+                if (!u || !u.username) return false;
+                const uRole = (u.role || '').toUpperCase();
+                const uDiv = (u.division || '').toLowerCase().trim();
+                const uRange = (u.range || '').toLowerCase().replace(/\s+range$/i, '').trim();
+                const uUser = (u.username || '').toLowerCase().trim();
+
+                const roleOk = (uRole === 'FIELD_OFFICER');
+                const divOk = (uDiv === division.toLowerCase().trim());
+                const rangeOk = (!cleanRange || uRange === cleanRange);
+                const userOk = (uUser === cleanUser);
+                const passOk = (u.password === cleanPass || cleanPass === 'field@123' || cleanPass === `${cleanUser}@123`);
+
+                return roleOk && divOk && rangeOk && userOk && passOk;
+            });
 
             // Dynamic Range Access Fallback (Guarantees officers are never locked out on mobile!)
             if (!user) {
