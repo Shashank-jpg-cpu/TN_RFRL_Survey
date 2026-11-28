@@ -378,21 +378,30 @@ async function checkAuthSession() {
     const loginScreen = document.getElementById('loginScreen');
     const appHeader = document.getElementById('appHeader');
     const mainContainer = document.getElementById('mainContainer');
+    const adminDashView = document.getElementById('adminDashboardView');
 
     if (!user) {
         document.documentElement.classList.remove('user-authenticated');
         if (loginScreen) loginScreen.style.display = 'flex';
         if (appHeader) appHeader.style.display = 'none';
         if (mainContainer) mainContainer.style.display = 'none';
+        if (adminDashView) adminDashView.style.display = 'none';
         if (window.surveyDB.stopHeartbeat) window.surveyDB.stopHeartbeat();
         return;
     }
 
-    // USER IS LOGGED IN: DISPLAY PORTAL SYNCHRONOUSLY & INSTANTLY (ZERO FLICKER ON REFRESH)
+    // USER IS LOGGED IN: DISPLAY PORTAL SYNCHRONOUSLY & INSTANTLY ACCORDING TO ROLE
     document.documentElement.classList.add('user-authenticated');
     if (loginScreen) loginScreen.style.display = 'none';
     if (appHeader) appHeader.style.display = 'flex';
-    if (mainContainer) mainContainer.style.display = 'flex';
+
+    if (user.role === 'ADMIN') {
+        if (adminDashView) adminDashView.style.display = 'block';
+        if (mainContainer) mainContainer.style.display = 'none';
+    } else {
+        if (adminDashView) adminDashView.style.display = 'none';
+        if (mainContainer) mainContainer.style.display = 'flex';
+    }
 
     const sessionKey = user.sessionKey || (user.role === 'DFO' ? `DFO_${user.division.toUpperCase().replace(/[^A-Z0-9]/g, '_')}` : `FO_${user.username.toUpperCase()}`);
     user.sessionKey = sessionKey;
@@ -472,6 +481,9 @@ async function handleLogout(e) {
     if (isLoggingOut) return;
     isLoggingOut = true;
 
+    const adminDashView = document.getElementById('adminDashboardView');
+    if (adminDashView) adminDashView.style.display = 'none';
+
     try {
         if (window.surveyDB && window.surveyDB.logout) {
             await window.surveyDB.logout();
@@ -541,7 +553,13 @@ function closeInstallGuideModal() {
 // -------------------------------------------------------------------------
 async function setupDfoPortal() {
     clearActiveBoundaryMap();
-    // 1. Cleanly pull latest cloud database once upon login
+    // 1. Cleanly isolate views (DFO only sees Satellite Map & DFO Survey Controls)
+    const adminDashView = document.getElementById('adminDashboardView');
+    const mainContainer = document.getElementById('mainContainer');
+    if (adminDashView) adminDashView.style.display = 'none';
+    if (mainContainer) mainContainer.style.display = 'flex';
+
+    // Cleanly pull latest cloud database once upon login
     if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
         try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
@@ -1706,10 +1724,10 @@ window.loadFieldAssignedBoundaries = async function(pullFirst = false) {
     }
 
     const all = await window.surveyDB.getAll('polygons');
-    // Strictly filter to current field officer's division and range using normalizeRange!
+    // Strictly filter to current field officer's division and range using normalizeDivision & normalizeRange!
     const rangePolys = all.filter(p => 
         p.division && p.range &&
-        p.division.toLowerCase() === currentDivision.toLowerCase() &&
+        normalizeDivision(p.division) === normalizeDivision(currentDivision) &&
         normalizeRange(p.range) === normalizeRange(currentRange)
     );
 
@@ -2072,6 +2090,13 @@ window.submitFieldRfRevision = async function() {
 };
 
 async function setupFieldPortal() {
+    clearActiveBoundaryMap();
+    // 1. Cleanly isolate views (Field Staff only sees Satellite Map & Field Controls)
+    const adminDashView = document.getElementById('adminDashboardView');
+    const mainContainer = document.getElementById('mainContainer');
+    if (adminDashView) adminDashView.style.display = 'none';
+    if (mainContainer) mainContainer.style.display = 'flex';
+
     if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
         try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
@@ -3058,6 +3083,70 @@ window.switchAdminTab = function(tab) {
     }
 };
 
+function extractBoundaryCoordinatesFromFile(text, fileName) {
+    const isKml = (fileName || '').toLowerCase().endsWith('.kml') || text.includes('<kml') || text.includes('<coordinates');
+    if (isKml) {
+        let rawStr = '';
+        try {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(text, 'text/xml');
+            let nodes = xml.getElementsByTagNameNS('*', 'coordinates');
+            if (!nodes || nodes.length === 0) {
+                nodes = xml.getElementsByTagName('coordinates');
+            }
+            if (nodes && nodes.length > 0) {
+                for (let i = 0; i < nodes.length; i++) {
+                    const s = nodes[i].textContent.trim();
+                    if (s.length > rawStr.length) rawStr = s;
+                }
+            }
+        } catch(e) {}
+
+        if (!rawStr) {
+            const matches = text.matchAll(/<coordinates[^>]*>([\s\S]*?)<\/coordinates>/gi);
+            for (const m of matches) {
+                const s = (m[1] || '').trim();
+                if (s.length > rawStr.length) rawStr = s;
+            }
+        }
+
+        if (rawStr) {
+            return rawStr.split(/\s+/).map(pair => {
+                const parts = pair.split(',');
+                if (parts.length >= 2) {
+                    const lon = parseFloat(parts[0]);
+                    const lat = parseFloat(parts[1]);
+                    if (!isNaN(lon) && !isNaN(lat)) {
+                        return [Number(lon.toFixed(10)), Number(lat.toFixed(10))];
+                    }
+                }
+                return null;
+            }).filter(Boolean);
+        }
+    } else {
+        try {
+            const geo = JSON.parse(text);
+            let coords = null;
+            if (geo.type === 'FeatureCollection' && geo.features && geo.features.length > 0) {
+                for (const f of geo.features) {
+                    if (f.geometry && f.geometry.coordinates) {
+                        coords = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates[0][0] : f.geometry.coordinates[0];
+                        break;
+                    }
+                }
+            } else if (geo.type === 'Feature' && geo.geometry && geo.geometry.coordinates) {
+                coords = geo.geometry.type === 'MultiPolygon' ? geo.geometry.coordinates[0][0] : geo.geometry.coordinates[0];
+            } else if (geo.coordinates) {
+                coords = geo.type === 'MultiPolygon' ? geo.coordinates[0][0] : geo.coordinates[0];
+            }
+            if (coords && Array.isArray(coords)) {
+                return coords.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]);
+            }
+        } catch(e) {}
+    }
+    return [];
+}
+
 window.handleAdminKmlFileUpload = async function(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -3077,35 +3166,18 @@ window.handleAdminKmlFileUpload = async function(e) {
     }
 
     const text = await file.text();
-    let coords = [];
+    const cleanCoords = extractBoundaryCoordinatesFromFile(text, file.name);
 
-    if (file.name.toLowerCase().endsWith('.kml')) {
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, 'text/xml');
-        const cNode = xml.querySelector('coordinates');
-        if (cNode) {
-            coords = cNode.textContent.trim().split(/\s+/).map(pair => {
-                const parts = pair.split(',');
-                return [parseFloat(parts[0]), parseFloat(parts[1])];
-            }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
-        }
-    } else {
-        const geo = JSON.parse(text);
-        if (geo.features && geo.features[0].geometry.coordinates) {
-            coords = geo.features[0].geometry.coordinates[0];
-        }
-    }
-
-    if (coords.length < 3) {
-        alert('Invalid KML/GeoJSON geometry: polygon must contain at least 3 coordinates.');
+    if (cleanCoords.length < 3) {
+        alert('Invalid boundary file: Unable to extract at least 3 valid coordinates.\n\nPlease ensure your KML or GeoJSON contains a valid closed perimeter polygon.');
         return;
     }
 
-    const cleanCoords = coords.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]);
     const nowIso = new Date().toISOString();
+    const cleanBName = bName.trim();
+    const bType = getBoundaryType(cleanBName); // 'RF' or 'RL'
 
     const allPolys = await window.surveyDB.getAll('polygons');
-    const cleanBName = bName.trim();
     const existing = allPolys.find(p => 
         (p.division || '').toLowerCase() === targetDiv.toLowerCase() &&
         (p.name || '').trim().toLowerCase() === cleanBName.toLowerCase()
@@ -3114,6 +3186,7 @@ window.handleAdminKmlFileUpload = async function(e) {
     let polyToSave;
     if (existing) {
         existing.range = targetRange;
+        existing.type = bType;
         existing.coordinates = cleanCoords;
         existing.originalCoordinates = JSON.parse(JSON.stringify(cleanCoords));
         existing.stage = 'STAGE_1_PENDING';
@@ -3128,11 +3201,11 @@ window.handleAdminKmlFileUpload = async function(e) {
         polyToSave = existing;
     } else {
         polyToSave = {
-            id: `RF_${targetDiv.replace(/\s+/g, '_')}_${Date.now()}`,
+            id: `RF_${targetDiv.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`,
             name: cleanBName,
             division: targetDiv,
             range: targetRange,
-            type: 'RF',
+            type: bType,
             status: 'OFFICIAL',
             stage: 'STAGE_1_PENDING',
             stage1_status: 'PENDING',
@@ -3149,12 +3222,30 @@ window.handleAdminKmlFileUpload = async function(e) {
         };
     }
 
+    // 1. Save locally in IndexedDB immediately
     await window.surveyDB.put('polygons', polyToSave);
-    if (navigator.onLine && window.surveyDB.syncCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
+
+    // 2. Immediately update memory cache and KPI counters
+    const idx = adminAllPolygonsCache.findIndex(p => p.id === polyToSave.id);
+    if (idx >= 0) {
+        adminAllPolygonsCache[idx] = polyToSave;
+    } else {
+        adminAllPolygonsCache.unshift(polyToSave);
+    }
+    updateAdminKpiCounts();
+    filterAdminBoundaries();
+
+    // 3. Immediately sync to cloud database and await so DFO and Field Staff receive it
+    if (navigator.onLine && window.surveyDB && window.surveyDB.syncCloud) {
+        try {
+            await window.surveyDB.syncCloud();
+        } catch (syncErr) {
+            console.warn('Sync cloud background notice:', syncErr);
+        }
     }
 
-    alert(`✓ Successfully saved "${cleanBName}" to ${targetDiv} Division (${targetRange} Range)!\n\nThis RF is now routed to ${targetDiv} DFO and field officers for Stage 1 survey.`);
+    showToastNotification(`✓ Successfully saved "${cleanBName}" (${bType}) to ${targetDiv} (${targetRange} Range)!`);
+    alert(`✓ Successfully uploaded "${cleanBName}" to ${targetDiv} Division (${targetRange} Range)!\n\nThis boundary is now immediately active in ${targetDiv} DFO Portal and Field Officers' devices.`);
 
     document.getElementById('adminUploadBoundaryName').value = '';
     e.target.value = '';

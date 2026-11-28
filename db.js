@@ -522,15 +522,13 @@ class SurveyDB {
                 }
             }
 
-            // 3. Sync Polygons (Authoritative Cloud Baseline & Cleanup)
+            // 3. Sync Polygons (Authoritative Cloud Baseline)
             if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
                 const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
                 const delPolys = new Set([...(cloudData.deleted_polygon_ids || []), ...localDelList]);
-                const validCloudIds = new Set();
 
                 for (const p of cloudData.polygons) {
                     if (p && p.id && !delPolys.has(p.id)) {
-                        validCloudIds.add(p.id);
                         const local = await this.get('polygons', p.id);
                         if (!local) {
                             await this.put('polygons', p);
@@ -542,14 +540,6 @@ class SurveyDB {
                                 await this.put('polygons', p);
                             }
                         }
-                    }
-                }
-
-                // Purge any local polygons that were deleted from cloud or are no longer in authoritative cloud list
-                const allLocalPolys = await this.getAll('polygons');
-                for (const lp of allLocalPolys) {
-                    if (lp && lp.id && !validCloudIds.has(lp.id)) {
-                        await this.delete('polygons', lp.id);
                     }
                 }
             }
