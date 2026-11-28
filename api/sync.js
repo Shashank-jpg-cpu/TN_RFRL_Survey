@@ -216,6 +216,42 @@ module.exports = async function handler(req, res) {
             }
 
             // -------------------------------------------------------------
+            // ACTION 3.5: PERMANENT POLYGON DELETION
+            // -------------------------------------------------------------
+            if (action === 'delete_polygon') {
+                const { polygonId, name, division } = body;
+                const delPolySet = new Set(store.deleted_polygon_ids || []);
+                if (polygonId) delPolySet.add(polygonId);
+
+                const targetKey = (division && name) ? `${division.toLowerCase().trim()}:::${name.toLowerCase().trim()}` : null;
+
+                store.polygons = (store.polygons || []).filter(p => {
+                    if (!p || !p.id) return false;
+                    if (polygonId && p.id === polygonId) {
+                        delPolySet.add(p.id);
+                        return false;
+                    }
+                    if (targetKey) {
+                        const k = `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;
+                        if (k === targetKey) {
+                            delPolySet.add(p.id);
+                            return false;
+                        }
+                    }
+                    return !delPolySet.has(p.id);
+                });
+
+                store.deleted_polygon_ids = Array.from(delPolySet);
+                await putMasterStore(store);
+
+                return res.status(200).json({
+                    success: true,
+                    message: 'Polygon permanently deleted from master cloud database',
+                    data: store
+                });
+            }
+
+            // -------------------------------------------------------------
             // ACTION 4: FULL BI-DIRECTIONAL DATA MERGE FOR ALL 51 DIVISIONS
             // -------------------------------------------------------------
             // 1. Merge deleted survey IDs

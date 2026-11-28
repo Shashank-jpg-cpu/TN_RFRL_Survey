@@ -611,7 +611,12 @@ async function loadDfoBoundaries() {
 
     if (filtered.length === 0) {
         bSelect.innerHTML = '<option value="">No RF/RL boundaries in database</option>';
+        currentBoundaryData = null;
         clearActiveBoundaryMap();
+        const actionRow = document.getElementById('boundaryActionRow');
+        const detCard = document.getElementById('dfoDetailsCard');
+        if (actionRow) actionRow.style.display = 'none';
+        if (detCard) detCard.style.display = 'none';
         return;
     }
 
@@ -2843,6 +2848,9 @@ window.handleGlobalForceRefresh = async function() {
                 if (fresh) {
                     currentBoundaryData = fresh;
                     renderActiveBoundary(false);
+                } else {
+                    currentBoundaryData = null;
+                    clearActiveBoundaryMap();
                 }
             }
         } else if (user && user.role === 'ADMIN') {
@@ -2855,6 +2863,9 @@ window.handleGlobalForceRefresh = async function() {
                     fieldActiveBoundaryData = JSON.parse(JSON.stringify(fresh));
                     renderFieldActiveBoundary(false);
                     if (fieldSelectedVertexIndex !== null) selectFieldVertex(fieldSelectedVertexIndex);
+                } else {
+                    fieldActiveBoundaryData = null;
+                    clearActiveBoundaryMap();
                 }
             }
         } else {
@@ -3462,33 +3473,19 @@ window.deleteAdminBoundary = async function(polyId) {
     }
 
     try {
-        // 1. Delete from IndexedDB locally
-        if (window.surveyDB) {
-            await window.surveyDB.delete('polygons', polyId);
-        }
-
-        // 2. Track in local deleted storage
-        const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
-        if (!localDelList.includes(polyId)) {
-            localDelList.push(polyId);
-            localStorage.setItem('tn_deleted_polygons', JSON.stringify(localDelList));
-        }
-
-        // 3. Immediately remove from local cache and refresh UI
+        // 1. Immediately remove from local cache and refresh Admin UI table & KPIs
         adminAllPolygonsCache = adminAllPolygonsCache.filter(p => p.id !== polyId);
         updateAdminKpiCounts();
         filterAdminBoundaries();
 
-        // 4. Sync deletion with cloud immediately
-        if (window.surveyDB && window.surveyDB.syncCloud) {
-            await window.surveyDB.syncCloud({
-                deletedPolygonId: polyId,
-                deletedPolygonName: boundaryName,
-                deletedPolygonDivision: boundaryDiv
-            });
+        // 2. Permanently delete from IndexedDB and Master Cloud Database
+        if (window.surveyDB && window.surveyDB.deletePolygonCloud) {
+            await window.surveyDB.deletePolygonCloud(polyId, boundaryName, boundaryDiv);
+        } else if (window.surveyDB) {
+            await window.surveyDB.delete('polygons', polyId);
         }
 
-        showToastNotification(`✓ Deleted "${boundaryName}" successfully.`);
+        showToastNotification(`✓ Deleted "${boundaryName}" permanently from cloud & all devices.`);
     } catch (err) {
         console.error('Error deleting boundary:', err);
         alert('Error deleting boundary: ' + err.message);

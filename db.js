@@ -50,7 +50,9 @@ class SurveyDB {
             request.onsuccess = async (event) => {
                 this.db = event.target.result;
                 await this.seedDemoData();
-                this.syncCloud().catch(() => {});
+                if (navigator.onLine) {
+                    try { await this.pullFromCloud(); } catch(e) {}
+                }
                 resolve(this.db);
             };
 
@@ -62,54 +64,8 @@ class SurveyDB {
     }
 
     async seedDemoData() {
-        const polyCount = await this.count('polygons');
-        if (polyCount === 0) {
-            // 1. Chennai Division Sample (Pallikaranai Range)
-            const sampleChennai = {
-                id: 'RF_CHENNAI_PALLIKARANAI_01',
-                name: 'Pallikaranai RF Block 1',
-                division: 'Chennai Division',
-                range: 'Pallikaranai',
-                type: 'RF',
-                status: 'OFFICIAL',
-                created_at: new Date().toISOString(),
-                flaggedVertices: [5], // Point #6 flagged for field verification
-                coordinates: [
-                    [80.2085, 12.9345],
-                    [80.2142, 12.9412],
-                    [80.2215, 12.9438],
-                    [80.2280, 12.9395],
-                    [80.2312, 12.9320],
-                    [80.2268, 12.9265],
-                    [80.2190, 12.9240],
-                    [80.2115, 12.9282]
-                ]
-            };
-            await this.put('polygons', sampleChennai);
-
-            // 2. Coimbatore Division Sample (Bolampatti Range)
-            const sampleCoimbatore = {
-                id: 'RF_COIMBATORE_BOLAMPATTI_01',
-                name: 'Bolampatti RF Compartment 12',
-                division: 'Coimbatore',
-                range: 'Bolampatti',
-                type: 'RF',
-                status: 'OFFICIAL',
-                created_at: new Date().toISOString(),
-                flaggedVertices: [5],
-                coordinates: [
-                    [76.8124, 10.9782],
-                    [76.8168, 10.9835],
-                    [76.8221, 10.9864],
-                    [76.8285, 10.9841],
-                    [76.8319, 10.9798],
-                    [76.8291, 10.9743],
-                    [76.8242, 10.9712],
-                    [76.8189, 10.9729]
-                ]
-            };
-            await this.put('polygons', sampleCoimbatore);
-        }
+        // Polygons are strictly managed by Master Admin KML uploads & cloud sync.
+        // No hardcoded sample or demo polygons are ever auto-seeded.
 
         // Seed demo field staff accounts created by DFOs
         // Always ensure Ranipet shashank is registered across all devices
@@ -522,11 +478,34 @@ class SurveyDB {
                 }
             }
 
-            // 3. Sync Polygons (Authoritative Cloud Baseline)
+            // 3. Sync Polygons (Authoritative Cloud Baseline & Deletion Synchronization)
             if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
                 const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
                 const delPolys = new Set([...(cloudData.deleted_polygon_ids || []), ...localDelList]);
 
+                // 1. Remove explicitly deleted polygons locally
+                for (const delPolyId of delPolys) {
+                    await this.delete('polygons', delPolyId);
+                }
+
+                // 2. On Mobile / Staff devices:
+                // Only the Master Cloud has authority on official boundaries.
+                // Any boundary that exists locally on phone but is NOT in cloudData.polygons was deleted by Admin!
+                // Purge it from the phone's local IndexedDB immediately.
+                const currentUser = this.getCurrentUser();
+                const isDfoOrStaff = currentUser && (currentUser.role === 'DFO' || currentUser.role === 'FIELD_OFFICER');
+                const cloudPolyIds = new Set(cloudData.polygons.map(p => p.id));
+
+                if (isDfoOrStaff) {
+                    const allLocal = await this.getAll('polygons');
+                    for (const lp of allLocal) {
+                        if (lp && lp.id && !cloudPolyIds.has(lp.id)) {
+                            await this.delete('polygons', lp.id);
+                        }
+                    }
+                }
+
+                // 3. Upsert valid active cloud polygons
                 for (const p of cloudData.polygons) {
                     if (p && p.id && !delPolys.has(p.id)) {
                         const local = await this.get('polygons', p.id);
@@ -585,11 +564,89 @@ class SurveyDB {
         return false;
     }
 
+    async deletePolygonCloud(polygonId, name, division) {
+        const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+        if (polygonId && !localDelList.includes(polygonId)) {
+            localDelList.push(polygonId);
+            localStorage.setItem('tn_deleted_polygons', JSON.stringify(localDelList));
+        }
+
+        // 1. Delete from IndexedDB locally
+        if (polygonId) {
+            await this.delete('polygons', polygonId);
+        }
+        if (division && name) {
+            const all = await this.getAll('polygons');
+            const targetKey = `${division.toLowerCase().trim()}:::${name.toLowerCase().trim()}`;
+            for (const p of all) {
+                const k = `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;
+                if (k === targetKey) {
+                    await this.delete('polygons', p.id);
+                    if (!localDelList.includes(p.id)) {
+                        localDelList.push(p.id);
+                        localStorage.setItem('tn_deleted_polygons', JSON.stringify(localDelList));
+                    }
+                }
+            }
+        }
+
+        // 2. Call cloud delete endpoint
+        const payload = {
+            action: 'delete_polygon',
+            polygonId: polygonId,
+            name: name,
+            division: division
+        };
+
+        let updatedStore = null;
+        try {
+            const res = await fetch(this.getApiUrl(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+                const json = await res.json();
+                if (json && json.data) updatedStore = json.data;
+            }
+        } catch(e) {}
+
+        // 3. Fallback direct cloud PUT
+        if (!updatedStore) {
+            try {
+                const d = await this.fetchDirectCloud() || {};
+                const delSet = new Set(d.deleted_polygon_ids || []);
+                if (polygonId) delSet.add(polygonId);
+                const targetKey = (division && name) ? `${division.toLowerCase().trim()}:::${name.toLowerCase().trim()}` : null;
+                d.polygons = (d.polygons || []).filter(p => {
+                    if (!p || !p.id) return false;
+                    if (polygonId && p.id === polygonId) { delSet.add(p.id); return false; }
+                    if (targetKey) {
+                        const k = `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;
+                        if (k === targetKey) { delSet.add(p.id); return false; }
+                    }
+                    return !delSet.has(p.id);
+                });
+                d.deleted_polygon_ids = Array.from(delSet);
+                await this.putDirectCloud(d);
+                updatedStore = d;
+            } catch(e) {}
+        }
+
+        if (updatedStore) {
+            await this.applyCloudData(updatedStore);
+        }
+        return true;
+    }
+
     async syncCloud(options = {}) {
         if (!navigator.onLine) return false;
         const users = await this.getAll('users');
         const polygons = await this.getAll('polygons');
         const pending_surveys = await this.getAll('pending_surveys');
+
+        const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+        const allDelPolyIds = Array.from(new Set([...(options.deletedPolygonId ? [options.deletedPolygonId] : []), ...localDelList]));
 
         const payload = {
             action: 'sync_data',
@@ -597,7 +654,10 @@ class SurveyDB {
             polygons: polygons,
             pending_surveys: pending_surveys,
             deleted_survey_ids: options.deletedSurveyId ? [options.deletedSurveyId] : [],
-            deleted_polygon_ids: options.deletedPolygonId ? [options.deletedPolygonId] : [],
+            deleted_polygon_ids: allDelPolyIds,
+            deletedPolygonId: options.deletedPolygonId || null,
+            deletedPolygonName: options.deletedPolygonName || null,
+            deletedPolygonDivision: options.deletedPolygonDivision || null,
             deleted_user_ids: options.deletedUserId ? [options.deletedUserId] : []
         };
 
