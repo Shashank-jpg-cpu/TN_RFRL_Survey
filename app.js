@@ -2865,19 +2865,81 @@ async function setupAdminPortal() {
     }
     document.getElementById('dfoPanel').style.display = 'none';
     document.getElementById('fieldPanel').style.display = 'none';
-    document.getElementById('adminPanel').style.display = 'block';
+
+    // Show full-width executive dashboard by default
+    const adminDashView = document.getElementById('adminDashboardView');
+    const mainContainer = document.getElementById('mainContainer');
+    if (adminDashView) adminDashView.style.display = 'block';
+    if (mainContainer) mainContainer.style.display = 'none';
 
     populateAdminDivisionSelects();
     await loadAdminDashboard();
+    await renderAdminStaffDirectory();
 
     const mapInfo = document.getElementById('activeMapInfo');
     if (mapInfo) mapInfo.textContent = 'Master Admin — All 51 Forest Divisions';
 }
 
+window.toggleAdminMapView = function() {
+    const adminDashView = document.getElementById('adminDashboardView');
+    const mainContainer = document.getElementById('mainContainer');
+    const btnReturn = document.getElementById('btnReturnAdminDash');
+
+    if (!adminDashView || !mainContainer) return;
+
+    if (adminDashView.style.display !== 'none') {
+        // Switch to Full Satellite Map View
+        adminDashView.style.display = 'none';
+        mainContainer.style.display = 'flex';
+        if (btnReturn) btnReturn.style.display = 'inline-flex';
+        if (map) {
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 120);
+        }
+    } else {
+        // Return to Admin Full-Screen Dashboard
+        mainContainer.style.display = 'none';
+        adminDashView.style.display = 'block';
+        if (btnReturn) btnReturn.style.display = 'none';
+        clearAuditMapLayers();
+        loadAdminDashboard();
+    }
+};
+
+window.purgeAllExistingKmls = async function() {
+    if (!confirm('WARNING: Are you sure you want to remove ALL existing KML boundaries from the database?\n\nThis will permanently delete all current boundaries from both local storage and cloud database.')) {
+        return;
+    }
+
+    try {
+        if (window.surveyDB) {
+            if (window.surveyDB.clear) {
+                await window.surveyDB.clear('polygons');
+                await window.surveyDB.clear('pending_surveys');
+            }
+        }
+        localStorage.removeItem('tn_deleted_polygons');
+
+        if (navigator.onLine && window.surveyDB && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud({ purge_all_polygons: true }).catch(() => {});
+        }
+
+        clearActiveBoundaryMap();
+        clearAuditMapLayers();
+        await loadAdminDashboard();
+        showToastNotification('✓ All existing KML boundaries successfully purged!');
+    } catch(err) {
+        console.error('Error purging KMLs:', err);
+        alert('Error purging KMLs: ' + err.message);
+    }
+};
+
 function populateAdminDivisionSelects() {
     const uploadDivSelect = document.getElementById('adminUploadDivisionSelect');
     const filterDivSelect = document.getElementById('adminFilterDivision');
     const exportDivSelect = document.getElementById('exportDivisionFilter');
+    const staffDivSelect = document.getElementById('adminStaffDivisionFilter');
 
     if (!uploadDivSelect || !window.TN_FOREST_HIERARCHY) return;
 
@@ -2908,6 +2970,16 @@ function populateAdminDivisionSelects() {
             opt.value = d;
             opt.textContent = d;
             exportDivSelect.appendChild(opt);
+        });
+    }
+
+    if (staffDivSelect) {
+        staffDivSelect.innerHTML = '<option value="ALL">All 51 Divisions</option>';
+        divisions.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            staffDivSelect.appendChild(opt);
         });
     }
 
@@ -2958,22 +3030,28 @@ window.onAdminFilterDivisionChange = function() {
 };
 
 window.switchAdminTab = function(tab) {
-    document.querySelectorAll('.btn-admin-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.btn-dash-tab').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.admin-tab-content').forEach(c => c.style.display = 'none');
 
-    if (tab === 'UPLOAD') {
-        const t = document.getElementById('tabAdminUpload');
-        const s = document.getElementById('adminUploadSection');
-        if (t) t.classList.add('active');
-        if (s) s.style.display = 'block';
-    } else if (tab === 'MONITOR') {
-        const t = document.getElementById('tabAdminMonitor');
+    if (tab === 'MONITOR') {
+        const t = document.getElementById('tabBtnMatrix');
         const s = document.getElementById('adminMonitorSection');
         if (t) t.classList.add('active');
         if (s) s.style.display = 'block';
         loadAdminDashboard();
+    } else if (tab === 'UPLOAD') {
+        const t = document.getElementById('tabBtnUpload');
+        const s = document.getElementById('adminUploadSection');
+        if (t) t.classList.add('active');
+        if (s) s.style.display = 'block';
+    } else if (tab === 'STAFF') {
+        const t = document.getElementById('tabBtnStaff');
+        const s = document.getElementById('adminStaffSection');
+        if (t) t.classList.add('active');
+        if (s) s.style.display = 'block';
+        renderAdminStaffDirectory();
     } else if (tab === 'EXPORT') {
-        const t = document.getElementById('tabAdminExport');
+        const t = document.getElementById('tabBtnExport');
         const s = document.getElementById('adminExportSection');
         if (t) t.classList.add('active');
         if (s) s.style.display = 'block';
@@ -3026,7 +3104,6 @@ window.handleAdminKmlFileUpload = async function(e) {
     const cleanCoords = coords.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]);
     const nowIso = new Date().toISOString();
 
-    // Check if boundary with same name exists in target division (strictly overwrite)
     const allPolys = await window.surveyDB.getAll('polygons');
     const cleanBName = bName.trim();
     const existing = allPolys.find(p => 
@@ -3038,7 +3115,7 @@ window.handleAdminKmlFileUpload = async function(e) {
     if (existing) {
         existing.range = targetRange;
         existing.coordinates = cleanCoords;
-        existing.originalCoordinates = JSON.parse(JSON.stringify(cleanCoords)); // Baseline Stage 0
+        existing.originalCoordinates = JSON.parse(JSON.stringify(cleanCoords));
         existing.stage = 'STAGE_1_PENDING';
         existing.stage1_status = 'PENDING';
         existing.stage2_status = 'PENDING';
@@ -3060,7 +3137,7 @@ window.handleAdminKmlFileUpload = async function(e) {
             stage: 'STAGE_1_PENDING',
             stage1_status: 'PENDING',
             stage2_status: 'PENDING',
-            originalCoordinates: JSON.parse(JSON.stringify(cleanCoords)), // Baseline Stage 0
+            originalCoordinates: JSON.parse(JSON.stringify(cleanCoords)),
             coordinates: cleanCoords,
             stage1Coordinates: null,
             stage2Coordinates: null,
@@ -3081,7 +3158,7 @@ window.handleAdminKmlFileUpload = async function(e) {
 
     document.getElementById('adminUploadBoundaryName').value = '';
     e.target.value = '';
-    await loadAdminDashboard();
+    switchAdminTab('MONITOR');
 };
 
 async function loadAdminDashboard() {
@@ -3160,16 +3237,16 @@ window.filterAdminBoundaries = function() {
 };
 
 function renderAdminBoundaryCards(list) {
-    const container = document.getElementById('adminBoundariesList');
-    if (!container) return;
+    const tbody = document.getElementById('adminBoundariesTableBody');
+    if (!tbody) return;
 
     if (list.length === 0) {
-        container.innerHTML = '<div class="empty-hint">No boundaries match the current filter.</div>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 24px; color: #94a3b8;">No boundaries match the current filter.</td></tr>';
         return;
     }
 
-    container.innerHTML = '';
-    list.forEach(p => {
+    tbody.innerHTML = '';
+    list.forEach((p, idx) => {
         const isS1Done = p.stage1_status === 'COMPLETED';
         const isS2Done = p.stage2_status === 'COMPLETED';
         const isFullyFinalized = isS1Done && isS2Done;
@@ -3182,48 +3259,173 @@ function renderAdminBoundaryCards(list) {
             }
         } catch(e) {}
 
-        const card = document.createElement('div');
-        card.className = 'admin-boundary-card';
-        card.innerHTML = `
-            <div class="admin-card-header">
-                <div>
-                    <div class="admin-card-title">${p.name}</div>
-                    <div class="admin-card-loc">${p.division} &bull; ${p.range ? p.range + ' Range' : 'General'}</div>
-                </div>
-                <div style="text-align: right; font-size: 10px; color: #cbd5e1;">
-                    <b style="color: #fbbf24;">${areaHa} Ha</b><br>
-                    <span>${p.coordinates ? p.coordinates.length : 0} cairns</span>
-                </div>
-            </div>
-
-            <div class="admin-card-stages">
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="text-align: center; color: #64748b; font-weight: 700;">${idx + 1}</td>
+            <td>
+                <b style="color: #38bdf8; font-size: 13px;">${p.name}</b>
+            </td>
+            <td><b>${p.division}</b></td>
+            <td>${p.range ? p.range + ' Range' : '<span style="color:#64748b;">General</span>'}</td>
+            <td style="text-align: right; font-weight: 700; color: #fbbf24;">${areaHa} Ha</td>
+            <td style="text-align: center;"><span style="background: rgba(255,255,255,0.06); padding: 2px 7px; border-radius: 4px;">${p.coordinates ? p.coordinates.length : 0}</span></td>
+            <td>
                 <div class="stage-pill ${isS1Done ? 'done' : 'pending'}">
-                    <span class="stage-pill-title"><i class="fa-solid ${isS1Done ? 'fa-check-circle' : 'fa-clock'}"></i> Stage 1: ${isS1Done ? 'Completed' : 'Pending'}</span>
+                    <span class="stage-pill-title"><i class="fa-solid ${isS1Done ? 'fa-check-circle' : 'fa-clock'}"></i> ${isS1Done ? 'Completed' : 'Pending'}</span>
                     <span class="stage-pill-sub">${isS1Done ? (p.stage1_officer || 'Field Staff') : 'Awaiting Field Survey'}</span>
                 </div>
+            </td>
+            <td>
                 <div class="stage-pill ${isS2Done ? 'done' : 'pending'}">
-                    <span class="stage-pill-title"><i class="fa-solid ${isS2Done ? 'fa-check-double' : 'fa-clock'}"></i> Stage 2: ${isS2Done ? 'Finalized' : 'Pending'}</span>
+                    <span class="stage-pill-title"><i class="fa-solid ${isS2Done ? 'fa-check-double' : 'fa-clock'}"></i> ${isS2Done ? 'Finalized' : 'Pending'}</span>
                     <span class="stage-pill-sub">${isS2Done ? (p.stage2_dfo || 'DFO Approved') : 'In DFO Queue'}</span>
                 </div>
-            </div>
-
-            <div class="admin-card-actions">
-                <button type="button" class="btn-admin-action inspect" onclick="openAdminCompareModal('${p.id}')">
-                    <i class="fa-solid fa-code-compare"></i> Audit &amp; Inspect
-                </button>
-                ${isFullyFinalized ? 
-                    `<button type="button" class="btn-admin-action download-final" onclick="downloadFinalizedKml('${p.id}')">
-                        <i class="fa-solid fa-download"></i> Final KML
-                    </button>` :
-                    `<button type="button" class="btn-admin-action locked" disabled title="Locked: Both Stage 1 (Field) and Stage 2 (DFO) must be completed first">
-                        <i class="fa-solid fa-lock"></i> Locked
-                    </button>`
-                }
-            </div>
+            </td>
+            <td style="text-align: center;">
+                <div style="display: flex; gap: 6px; justify-content: center;">
+                    <button type="button" class="btn-admin-action inspect" onclick="auditAndInspectBoundaryOnMap('${p.id}')" title="Audit Stage 0 vs 1 vs 2 on Satellite Map">
+                        <i class="fa-solid fa-code-compare"></i> Audit &amp; Inspect
+                    </button>
+                    ${isFullyFinalized ? 
+                        `<button type="button" class="btn-admin-action download-final" onclick="downloadFinalizedKml('${p.id}')" title="Download Finalized KML">
+                            <i class="fa-solid fa-download"></i> Final KML
+                        </button>` :
+                        `<button type="button" class="btn-admin-action locked" disabled title="Locked: Both Stage 1 and Stage 2 must be completed first">
+                            <i class="fa-solid fa-lock"></i> Locked
+                        </button>`
+                    }
+                </div>
+            </td>
         `;
-        container.appendChild(card);
+        tbody.appendChild(tr);
     });
 }
+
+window.auditAndInspectBoundaryOnMap = async function(polyId) {
+    const adminDashView = document.getElementById('adminDashboardView');
+    const mainContainer = document.getElementById('mainContainer');
+    const btnReturn = document.getElementById('btnReturnAdminDash');
+
+    if (adminDashView) adminDashView.style.display = 'none';
+    if (mainContainer) mainContainer.style.display = 'flex';
+    if (btnReturn) btnReturn.style.display = 'inline-flex';
+
+    if (map) {
+        setTimeout(() => {
+            map.invalidateSize();
+            openAdminCompareModal(polyId);
+        }, 120);
+    } else {
+        openAdminCompareModal(polyId);
+    }
+};
+
+window.renderAdminStaffDirectory = async function() {
+    const container = document.getElementById('adminStaffDirectoryContainer');
+    if (!container) return;
+
+    let allUsers = [];
+    if (window.surveyDB) {
+        allUsers = await window.surveyDB.getAll('users');
+    }
+
+    const fieldOfficers = (allUsers || []).filter(u => u && u.role === 'FIELD_OFFICER');
+
+    const totalOffEl = document.getElementById('statTotalOfficers');
+    if (totalOffEl) totalOffEl.textContent = fieldOfficers.length;
+
+    const divFilter = (document.getElementById('adminStaffDivisionFilter') || {}).value || 'ALL';
+
+    const hierarchy = window.TN_FOREST_HIERARCHY || {};
+    let divisions = Object.keys(hierarchy).sort();
+
+    if (divFilter !== 'ALL') {
+        divisions = divisions.filter(d => d.toLowerCase() === divFilter.toLowerCase());
+    }
+
+    if (divisions.length === 0) {
+        container.innerHTML = '<div class="empty-hint">No division records found.</div>';
+        return;
+    }
+
+    container.innerHTML = '';
+
+    divisions.forEach(div => {
+        const ranges = hierarchy[div] || [];
+        const divOfficers = fieldOfficers.filter(u => (u.division || '').toLowerCase() === div.toLowerCase());
+        const creds = window.getDfoCreds ? window.getDfoCreds(div) : null;
+        const dfoUser = creds ? creds.username : `dfo_${div.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+
+        const card = document.createElement('div');
+        card.className = 'division-staff-card';
+
+        let rangeRows = ranges.map(r => {
+            const cleanR = r.toLowerCase().replace(/\s+range$/i, '').trim();
+            const rangeStaff = divOfficers.filter(u => {
+                const uRange = (u.range || '').toLowerCase().replace(/\s+range$/i, '').trim();
+                return uRange === cleanR || uRange.includes(cleanR) || cleanR.includes(uRange);
+            });
+
+            const staffNames = rangeStaff.map(s => `<b>${s.name || s.username}</b> (<span style="color:#94a3b8">${s.username}</span>)`).join(', ');
+
+            return `
+                <tr>
+                    <td style="font-weight: 600; color: #f8fafc;">${r} Range</td>
+                    <td style="text-align: center;">
+                        ${rangeStaff.length > 0 ? 
+                            `<span class="badge-staff-count">${rangeStaff.length} Officer${rangeStaff.length > 1 ? 's' : ''}</span>` : 
+                            `<span class="badge-staff-empty">0 Staff</span>`}
+                    </td>
+                    <td style="font-size: 11px; color: #cbd5e1;">${staffNames || '<span style="color:#64748b;">No officers assigned</span>'}</td>
+                </tr>
+            `;
+        }).join('');
+
+        card.innerHTML = `
+            <div class="div-staff-header">
+                <div>
+                    <div class="div-staff-name"><i class="fa-solid fa-tree text-emerald"></i> ${div}</div>
+                    <div class="div-staff-dfo"><i class="fa-solid fa-shield-halved text-amber"></i> DFO Login: <b>${dfoUser}</b> &bull; ${ranges.length} Official Ranges</div>
+                </div>
+                <div style="text-align: right;">
+                    <span class="badge-role-admin" style="font-size: 11px;">${divOfficers.length} Total Officers</span>
+                </div>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="range-staff-table">
+                    <thead>
+                        <tr>
+                            <th>Forest Range</th>
+                            <th style="text-align: center; width: 90px;">Staff Count</th>
+                            <th>Assigned Field Officers</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rangeRows}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        container.appendChild(card);
+    });
+};
+
+window.selectAllExportColumns = function() {
+    const ids = ['colDivision', 'colRange', 'colName', 'colArea', 'colCairns', 'colBaselineDate', 'colStage1Status', 'colStage1Officer', 'colStage1Date', 'colStage2Status', 'colStage2Date', 'colDisputeCount'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = true;
+    });
+};
+
+window.deselectAllExportColumns = function() {
+    const ids = ['colDivision', 'colRange', 'colName', 'colArea', 'colCairns', 'colBaselineDate', 'colStage1Status', 'colStage1Officer', 'colStage1Date', 'colStage2Status', 'colStage2Date', 'colDisputeCount'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.checked = false;
+    });
+};
 
 window.openAdminCompareModal = async function(polyId) {
     const poly = await window.surveyDB.get('polygons', polyId);

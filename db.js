@@ -251,6 +251,16 @@ class SurveyDB {
         });
     }
 
+    async clear(storeName) {
+        return new Promise((resolve, reject) => {
+            const tx = this.db.transaction(storeName, 'readwrite');
+            const store = tx.objectStore(storeName);
+            const req = store.clear();
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    }
+
     async count(storeName) {
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(storeName, 'readonly');

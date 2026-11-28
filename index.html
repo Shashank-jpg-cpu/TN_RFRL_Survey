@@ -32,7 +32,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=22').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=23').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -94,6 +94,294 @@
             </button>
         </div>
     </header>
+
+    <!-- ========================================================================= -->
+    <!-- MASTER STATE ADMIN FULL-SCREEN EXECUTIVE COMMAND CENTER                  -->
+    <!-- ========================================================================= -->
+    <div id="adminDashboardView" class="admin-dashboard-fullview" style="display: none;">
+        <div class="admin-dash-wrapper">
+            <!-- Top Action & Navigation Banner -->
+            <div class="admin-dash-header">
+                <div class="admin-dash-title-group">
+                    <div class="admin-dash-title">
+                        <i class="fa-solid fa-crown text-amber"></i> Master State Admin Command Center
+                        <span class="badge-role-admin">STATE HQ</span>
+                    </div>
+                    <div class="admin-dash-subtitle">
+                        Statewide Administrative Monitoring &bull; All 51 Forest Divisions &bull; Two-Stage Cadastral Verification
+                    </div>
+                </div>
+
+                <div class="admin-dash-actions">
+                    <!-- ONE-BUTTON SATELLITE MAP VIEW TOGGLE -->
+                    <button type="button" class="btn-admin-map-toggle" onclick="toggleAdminMapView()" title="Switch to Full Satellite Map View">
+                        <i class="fa-solid fa-map-location-dot"></i> <span>View Satellite Map</span>
+                    </button>
+                    <!-- Purge / Reset Test Boundaries Button -->
+                    <button type="button" class="btn-admin-purge" onclick="purgeAllExistingKmls()" title="Remove All Test KMLs from Database">
+                        <i class="fa-solid fa-trash-can"></i> <span>Remove All KMLs</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Wide KPI Metric Cards Grid -->
+            <div class="admin-kpi-wide-grid">
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #38bdf8;"><i class="fa-solid fa-draw-polygon"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num" id="kpiTotalRfs">0</div>
+                        <div class="kpi-label">Total Uploaded RFs</div>
+                    </div>
+                </div>
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #fbbf24;"><i class="fa-solid fa-clock"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num text-amber" id="kpiStage1Pending">0</div>
+                        <div class="kpi-label">Stage 1 Pending (Field)</div>
+                    </div>
+                </div>
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #38bdf8;"><i class="fa-solid fa-person-walking"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num text-cyan" id="kpiStage1Done">0</div>
+                        <div class="kpi-label">Stage 1 Completed</div>
+                    </div>
+                </div>
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #f97316;"><i class="fa-solid fa-hourglass-half"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num text-orange" id="kpiStage2Pending">0</div>
+                        <div class="kpi-label">Stage 2 Pending (DFO)</div>
+                    </div>
+                </div>
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #34d399;"><i class="fa-solid fa-circle-check"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num text-emerald" id="kpiStage2Done">0</div>
+                        <div class="kpi-label">Stage 2 Finalized</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Full Dashboard Navigation Tabs -->
+            <div class="admin-dash-nav">
+                <button type="button" id="tabBtnMatrix" class="btn-dash-tab active" onclick="switchAdminTab('MONITOR')">
+                    <i class="fa-solid fa-list-check"></i> 51 Divisions Boundaries Matrix
+                </button>
+                <button type="button" id="tabBtnUpload" class="btn-dash-tab" onclick="switchAdminTab('UPLOAD')">
+                    <i class="fa-solid fa-cloud-arrow-up"></i> Upload Master KML
+                </button>
+                <button type="button" id="tabBtnStaff" class="btn-dash-tab" onclick="switchAdminTab('STAFF')">
+                    <i class="fa-solid fa-users-viewfinder"></i> DFO &amp; Range Staff Directory
+                </button>
+                <button type="button" id="tabBtnExport" class="btn-dash-tab" onclick="switchAdminTab('EXPORT')">
+                    <i class="fa-solid fa-file-export"></i> Export Reports (Excel &amp; PDF)
+                </button>
+            </div>
+
+            <!-- TAB 1: 51 DIVISIONS BOUNDARIES MATRIX (Wide Table) -->
+            <div id="adminMonitorSection" class="admin-tab-content">
+                <div class="matrix-filter-card-wide">
+                    <div class="filter-field">
+                        <label>Filter Division:</label>
+                        <select id="adminFilterDivision" class="form-control" onchange="onAdminFilterDivisionChange()">
+                            <option value="ALL">All 51 Divisions</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label>Filter Range:</label>
+                        <select id="adminFilterRange" class="form-control" onchange="filterAdminBoundaries()">
+                            <option value="ALL">All Ranges</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label>Verification Stage:</label>
+                        <select id="adminFilterStage" class="form-control" onchange="filterAdminBoundaries()">
+                            <option value="ALL">All Verification Stages</option>
+                            <option value="STAGE_1_PENDING">Stage 1 Pending (Field Survey Pending)</option>
+                            <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done &bull; Stage 2 Pending (In DFO Queue)</option>
+                            <option value="STAGE_2_DONE">Stage 2 Finalized (Fully Completed)</option>
+                        </select>
+                    </div>
+                    <div class="filter-field search-field">
+                        <label>Search:</label>
+                        <input type="text" id="adminSearchInput" class="form-control" placeholder="Search RF name, range, division..." oninput="filterAdminBoundaries()">
+                    </div>
+                    <button type="button" class="btn-sync-cloud-action" onclick="handleGlobalForceRefresh()" title="Sync Cloud">
+                        <i class="fa-solid fa-arrows-rotate"></i> Sync Cloud
+                    </button>
+                </div>
+
+                <div class="matrix-table-count-bar">
+                    <span>Showing <b id="adminFilteredCount" class="text-cyan">0</b> Boundaries</span>
+                </div>
+
+                <div class="admin-table-container">
+                    <table class="admin-wide-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 40px; text-align: center;">#</th>
+                                <th>RF / RL Boundary Name</th>
+                                <th>Division</th>
+                                <th>Range</th>
+                                <th style="text-align: right;">Area (Ha)</th>
+                                <th style="text-align: center;">Cairns</th>
+                                <th>Stage 1 (Field Survey)</th>
+                                <th>Stage 2 (DFO Review)</th>
+                                <th style="text-align: center; width: 230px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminBoundariesTableBody">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 2: UPLOAD MASTER KML TO DIVISION -->
+            <div id="adminUploadSection" class="admin-tab-content" style="display: none;">
+                <div class="admin-wide-card">
+                    <div class="wide-card-header">
+                        <i class="fa-solid fa-file-arrow-up text-cyan" style="font-size: 24px;"></i>
+                        <div>
+                            <div class="wide-card-title">Upload Official Master Baseline KML</div>
+                            <div class="wide-card-desc">Assign baseline RF/RL boundary to specific Division and Range. Automatically routes to DFO &amp; field staff.</div>
+                        </div>
+                    </div>
+                    <div class="admin-upload-grid">
+                        <div class="form-group">
+                            <label>Target Forest Division (1 of 51)</label>
+                            <select id="adminUploadDivisionSelect" class="form-control" onchange="onAdminUploadDivisionChange()">
+                                <!-- Populated dynamically -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Target Range in Division</label>
+                            <select id="adminUploadRangeSelect" class="form-control">
+                                <!-- Populated dynamically based on division -->
+                            </select>
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>RF / RL Boundary Name</label>
+                            <input type="text" id="adminUploadBoundaryName" class="form-control" placeholder="e.g. Vellore RF Block 1">
+                        </div>
+                        <div class="upload-dropzone" style="grid-column: 1 / -1;">
+                            <label for="adminKmlFileInput" class="btn-primary btn-lg" style="cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+                                <i class="fa-solid fa-file-import"></i> Choose Master KML / GeoJSON File
+                            </label>
+                            <input type="file" id="adminKmlFileInput" accept=".kml,.geojson,.json" style="display: none;" onchange="handleAdminKmlFileUpload(event)">
+                            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 8px;">Accepts official .kml, .geojson, .json cadastral perimeter files</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: DFO & RANGE FIELD STAFF ALLOCATION DIRECTORY -->
+            <div id="adminStaffSection" class="admin-tab-content" style="display: none;">
+                <div class="admin-wide-card">
+                    <div class="wide-card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <i class="fa-solid fa-users-viewfinder text-cyan" style="font-size: 24px;"></i>
+                            <div>
+                                <div class="wide-card-title">DFO &amp; Range Field Officers Allocation Directory</div>
+                                <div class="wide-card-desc">Review which Division DFO has how many field officers working for each range.</div>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin: 0;">Division Scope:</label>
+                            <select id="adminStaffDivisionFilter" class="form-control" style="width: auto; min-width: 220px;" onchange="renderAdminStaffDirectory()">
+                                <option value="ALL">All 51 Divisions</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Staff Stats Summary Bar -->
+                    <div class="staff-summary-stat-bar">
+                        <div class="stat-pill"><i class="fa-solid fa-shield-halved text-amber"></i> Total Divisions: <b id="statTotalDivisions">51</b></div>
+                        <div class="stat-pill"><i class="fa-solid fa-users text-cyan"></i> Total Active Field Officers: <b id="statTotalOfficers">0</b></div>
+                    </div>
+
+                    <!-- Directory Container -->
+                    <div id="adminStaffDirectoryContainer" class="staff-directory-grid">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: EXPORT REPORTS (Excel & PDF) -->
+            <div id="adminExportSection" class="admin-tab-content" style="display: none;">
+                <div class="admin-wide-card">
+                    <div class="wide-card-header">
+                        <i class="fa-solid fa-file-export text-cyan" style="font-size: 24px;"></i>
+                        <div>
+                            <div class="wide-card-title">Customizable Excel &amp; PDF Report Generator</div>
+                            <div class="wide-card-desc">Filter verification stages, choose exact columns, and export formal reports.</div>
+                        </div>
+                    </div>
+
+                    <div class="export-config-grid">
+                        <div class="form-group">
+                            <label>Filter by Stage:</label>
+                            <select id="exportStageFilter" class="form-control">
+                                <option value="ALL">All Uploaded RF/RL Boundaries</option>
+                                <option value="PENDING">All Pending (Stage 1 or Stage 2 Pending)</option>
+                                <option value="STAGE_1_DONE">Stage 1 Completed List</option>
+                                <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done but Stage 2 Pending (In DFO Queue)</option>
+                                <option value="STAGE_2_DONE">Fully Completed List (Stage 1 &amp; Stage 2 Finalized)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Filter by Division Scope:</label>
+                            <select id="exportDivisionFilter" class="form-control">
+                                <option value="ALL">All 51 Divisions</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Column Picker with CHOOSE ALL and REMOVE ALL -->
+                    <div class="column-picker-wide">
+                        <div class="column-picker-top">
+                            <span class="picker-title"><i class="fa-solid fa-table-columns text-cyan"></i> Select Columns to Include in Report:</span>
+                            <div class="picker-btn-group">
+                                <button type="button" class="btn-picker-action" onclick="selectAllExportColumns()">
+                                    <i class="fa-solid fa-check-double text-emerald"></i> Choose All
+                                </button>
+                                <button type="button" class="btn-picker-action" onclick="deselectAllExportColumns()">
+                                    <i class="fa-solid fa-xmark text-red"></i> Remove All
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="column-checkboxes-wide">
+                            <label class="col-check-item"><input type="checkbox" id="colDivision" checked> Division Name</label>
+                            <label class="col-check-item"><input type="checkbox" id="colRange" checked> Range Name</label>
+                            <label class="col-check-item"><input type="checkbox" id="colName" checked> RF / RL Name</label>
+                            <label class="col-check-item"><input type="checkbox" id="colArea" checked> Total Area (Ha)</label>
+                            <label class="col-check-item"><input type="checkbox" id="colCairns" checked> Cairns Count</label>
+                            <label class="col-check-item"><input type="checkbox" id="colBaselineDate" checked> Baseline Upload Date</label>
+                            <label class="col-check-item"><input type="checkbox" id="colStage1Status" checked> Stage 1 Status</label>
+                            <label class="col-check-item"><input type="checkbox" id="colStage1Officer" checked> Field Officer</label>
+                            <label class="col-check-item"><input type="checkbox" id="colStage1Date" checked> Stage 1 Date</label>
+                            <label class="col-check-item"><input type="checkbox" id="colStage2Status" checked> Stage 2 Status</label>
+                            <label class="col-check-item"><input type="checkbox" id="colStage2Date" checked> DFO Approval Date</label>
+                            <label class="col-check-item"><input type="checkbox" id="colDisputeCount" checked> Flagged Dispute Points</label>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="export-actions-row">
+                        <button type="button" class="btn-success btn-lg" onclick="handleAdminExportExcel()">
+                            <i class="fa-solid fa-file-excel"></i> Export Excel Spreadsheet (.xlsx/CSV)
+                        </button>
+                        <button type="button" class="btn-primary btn-lg" onclick="handleAdminExportPdf()" style="background: #dc2626; border-color: #ef4444;">
+                            <i class="fa-solid fa-file-pdf"></i> Export Official PDF Audit Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Main Container Layout (Hidden until user logs in, ALWAYS SIDE-BY-SIDE ON DESKTOP & MOBILE SLIDE-OUT) -->
     <div id="mainContainer" class="main-container" style="display: none;">
@@ -503,194 +791,6 @@
                     </button>
                 </div>
             </div>
-
-            <!-- Mode 3: Master Admin Command Center (Statewide 51 Divisions) -->
-            <div id="adminPanel" class="role-panel" style="display: none;">
-                <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
-                    <span><i class="fa-solid fa-crown text-amber"></i> Master Admin Portal</span>
-                    <span class="badge-role-admin">STATE HQ</span>
-                </div>
-
-                <!-- Division and Statewide Scope Info -->
-                <div class="division-badge-card admin-scope-card">
-                    <div>Jurisdiction: <b class="text-amber">All 51 Forest Divisions</b></div>
-                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Central Survey Management &amp; Two-Stage Verification</div>
-                </div>
-
-                <!-- KPI Metrics Summary Grid -->
-                <div class="admin-kpi-grid">
-                    <div class="admin-kpi-card">
-                        <div class="kpi-num" id="kpiTotalRfs">0</div>
-                        <div class="kpi-label">Total Uploaded</div>
-                    </div>
-                    <div class="admin-kpi-card stage1-pending-kpi">
-                        <div class="kpi-num text-amber" id="kpiStage1Pending">0</div>
-                        <div class="kpi-label">Stage 1 Pending</div>
-                    </div>
-                    <div class="admin-kpi-card stage1-done-kpi">
-                        <div class="kpi-num text-cyan" id="kpiStage1Done">0</div>
-                        <div class="kpi-label">Stage 1 Done</div>
-                    </div>
-                    <div class="admin-kpi-card stage2-pending-kpi">
-                        <div class="kpi-num text-orange" id="kpiStage2Pending">0</div>
-                        <div class="kpi-label">Stage 2 Pending</div>
-                    </div>
-                    <div class="admin-kpi-card stage2-done-kpi">
-                        <div class="kpi-num text-emerald" id="kpiStage2Done">0</div>
-                        <div class="kpi-label">Fully Finalized</div>
-                    </div>
-                </div>
-
-                <!-- Admin Action Navigation Tabs -->
-                <div class="admin-nav-tabs">
-                    <button type="button" id="tabAdminUpload" class="btn-admin-tab active" onclick="switchAdminTab('UPLOAD')">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Master KML
-                    </button>
-                    <button type="button" id="tabAdminMonitor" class="btn-admin-tab" onclick="switchAdminTab('MONITOR')">
-                        <i class="fa-solid fa-list-check"></i> 51 Divisions Matrix
-                    </button>
-                    <button type="button" id="tabAdminExport" class="btn-admin-tab" onclick="switchAdminTab('EXPORT')">
-                        <i class="fa-solid fa-file-export"></i> Export Reports
-                    </button>
-                </div>
-
-                <!-- SUBSECTION 1: UPLOAD MASTER KML TO DIVISION -->
-                <div id="adminUploadSection" class="admin-tab-content">
-                    <div class="upload-section-card admin-upload-card">
-                        <div class="section-subtitle"><i class="fa-solid fa-file-arrow-up"></i> Upload Master Baseline KML</div>
-                        <div class="form-group">
-                            <label>Target Forest Division (1 of 51)</label>
-                            <select id="adminUploadDivisionSelect" class="form-control" onchange="onAdminUploadDivisionChange()">
-                                <!-- Populated dynamically with all 51 divisions -->
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Target Range in Division</label>
-                            <select id="adminUploadRangeSelect" class="form-control">
-                                <!-- Populated dynamically based on division -->
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>RF / RL Boundary Name</label>
-                            <input type="text" id="adminUploadBoundaryName" class="form-control" placeholder="e.g. Vellore RF Block 1">
-                        </div>
-                        <div class="upload-file-btn-wrapper" style="margin-top: 10px;">
-                            <label for="adminKmlFileInput" class="btn-primary btn-block btn-lg" style="text-align: center; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                                <i class="fa-solid fa-file-import"></i> Choose Master KML / GeoJSON File
-                            </label>
-                            <input type="file" id="adminKmlFileInput" accept=".kml,.geojson,.json" style="display: none;" onchange="handleAdminKmlFileUpload(event)">
-                        </div>
-                        <div class="upload-hint-box" style="margin-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4; background: rgba(56, 189, 248, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.2);">
-                            <i class="fa-solid fa-circle-info text-cyan"></i> <b>Workflow Routing:</b> Uploaded KML is stored as <b>Stage 0 Baseline</b> and instantly routed to the DFO of this division and all assigned field staff.
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SUBSECTION 2: 51 DIVISIONS BOUNDARY MATRIX & 2-STAGE MONITORING -->
-                <div id="adminMonitorSection" class="admin-tab-content" style="display: none;">
-                    <div class="matrix-filter-card" style="background: rgba(15, 23, 42, 0.6); padding: 10px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15);">
-                        <div class="form-group" style="margin-bottom: 6px;">
-                            <label>Filter by Division</label>
-                            <select id="adminFilterDivision" class="form-control" onchange="onAdminFilterDivisionChange()">
-                                <option value="ALL">All 51 Divisions</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 6px;">
-                            <label>Filter by Range</label>
-                            <select id="adminFilterRange" class="form-control" onchange="filterAdminBoundaries()">
-                                <option value="ALL">All Ranges</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 6px;">
-                            <label>Filter by Verification Stage</label>
-                            <select id="adminFilterStage" class="form-control" onchange="filterAdminBoundaries()">
-                                <option value="ALL">All Verification Stages</option>
-                                <option value="STAGE_1_PENDING">Stage 1 Pending (Field Survey Pending)</option>
-                                <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done &bull; Stage 2 Pending (In DFO Queue)</option>
-                                <option value="STAGE_2_DONE">Stage 2 Finalized (Fully Completed)</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <input type="text" id="adminSearchInput" class="form-control" placeholder="Search RF name, range, division..." oninput="filterAdminBoundaries()">
-                        </div>
-                    </div>
-
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0 6px 0;">
-                        <span style="font-size: 12px; font-weight: 700; color: #cbd5e1;">Boundaries Matrix (<span id="adminFilteredCount">0</span>)</span>
-                        <button type="button" class="btn-sync-cloud-mini" onclick="handleGlobalForceRefresh()" title="Sync Cloud" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">
-                            <i class="fa-solid fa-arrows-rotate"></i> Sync Cloud
-                        </button>
-                    </div>
-
-                    <!-- Boundaries List -->
-                    <div id="adminBoundariesList" class="admin-boundary-list">
-                        <!-- Populated dynamically -->
-                    </div>
-                </div>
-
-                <!-- SUBSECTION 3: CUSTOMIZABLE EXCEL & PDF EXPORT -->
-                <div id="adminExportSection" class="admin-tab-content" style="display: none;">
-                    <div class="export-config-card" style="background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15);">
-                        <div class="section-subtitle" style="margin-bottom: 8px;"><i class="fa-solid fa-sliders text-cyan"></i> Export Filter &amp; Column Selection</div>
-                        
-                        <div class="form-group">
-                            <label>Select Stage Filter</label>
-                            <select id="exportStageFilter" class="form-control">
-                                <option value="ALL">All Uploaded RF/RL Boundaries</option>
-                                <option value="PENDING">All Pending (Stage 1 or Stage 2 Pending)</option>
-                                <option value="STAGE_1_DONE">Stage 1 Completed List</option>
-                                <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done but Stage 2 Pending (In DFO Queue)</option>
-                                <option value="STAGE_2_DONE">Fully Completed List (Stage 1 &amp; Stage 2 Finalized)</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label>Select Division Scope</label>
-                            <select id="exportDivisionFilter" class="form-control">
-                                <option value="ALL">All 51 Divisions</option>
-                            </select>
-                        </div>
-
-                        <div class="column-picker-box" style="margin-top: 10px; background: rgba(2, 6, 23, 0.5); padding: 10px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.1);">
-                            <div class="column-picker-title" style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">Choose Columns to Include in Report:</div>
-                            <div class="column-checkboxes-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #cbd5e1;">
-                                <label><input type="checkbox" id="colDivision" checked> Division Name</label>
-                                <label><input type="checkbox" id="colRange" checked> Range Name</label>
-                                <label><input type="checkbox" id="colName" checked> RF / RL Name</label>
-                                <label><input type="checkbox" id="colArea" checked> Total Area (Ha)</label>
-                                <label><input type="checkbox" id="colCairns" checked> Cairns Count</label>
-                                <label><input type="checkbox" id="colBaselineDate" checked> Baseline Upload Date</label>
-                                <label><input type="checkbox" id="colStage1Status" checked> Stage 1 Status</label>
-                                <label><input type="checkbox" id="colStage1Officer" checked> Field Officer</label>
-                                <label><input type="checkbox" id="colStage1Date" checked> Stage 1 Date</label>
-                                <label><input type="checkbox" id="colStage2Status" checked> Stage 2 Status</label>
-                                <label><input type="checkbox" id="colStage2Date" checked> DFO Approval Date</label>
-                                <label><input type="checkbox" id="colDisputeCount" checked> Flagged Dispute Points</label>
-                            </div>
-                        </div>
-
-                        <div class="export-action-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px;">
-                            <button type="button" class="btn-success btn-lg" onclick="handleAdminExportExcel()" style="padding: 10px; font-size: 11px; font-weight: 700;">
-                                <i class="fa-solid fa-file-excel"></i> Export Excel (.xlsx/CSV)
-                            </button>
-                            <button type="button" class="btn-primary btn-lg" onclick="handleAdminExportPdf()" style="padding: 10px; font-size: 11px; font-weight: 700; background: #dc2626; border-color: #ef4444;">
-                                <i class="fa-solid fa-file-pdf"></i> Export PDF Report
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Mobile App APK Download Block (Admin Portal) -->
-                <div class="apk-download-box" style="margin-top: 15px;">
-                    <button type="button" class="btn-download-apk-block" onclick="handleInstallApp()" title="Install App">
-                        <i class="fa-brands fa-android apk-icon-large"></i>
-                        <div class="apk-btn-text">
-                            <span class="apk-btn-title">Install Mobile App (TN RFRL Survey)</span>
-                            <span class="apk-btn-sub">Tap to Add to Android Home Screen &bull; Offline Ready</span>
-                        </div>
-                    </button>
-                </div>
-            </div>
         </aside>
 
         <!-- Main Map Area (Takes full remaining space) -->
@@ -700,6 +800,10 @@
 
             <!-- Floating Top Toolbar (Unified flexbox row: Panel toggle + My Location + Active Boundary) -->
             <div class="map-top-bar">
+                <button id="btnReturnAdminDash" class="map-bar-btn btn-admin-return" style="display: none; background: #0284c7; color: #ffffff; font-weight: 700; border-color: #38bdf8;" onclick="toggleAdminMapView()" title="Return to Admin Executive Dashboard">
+                    <i class="fa-solid fa-gauge-high"></i>
+                    <span>Admin Dashboard</span>
+                </button>
                 <button id="sidebarToggleBtn" class="map-bar-btn btn-panel-toggle" onclick="toggleSidebarPanel()" title="Open/Close Survey Controls">
                     <i id="sidebarToggleIcon" class="fa-solid fa-bars"></i>
                     <span id="sidebarToggleText" class="sidebar-btn-label">Panel</span>

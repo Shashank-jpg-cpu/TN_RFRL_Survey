@@ -249,6 +249,14 @@ module.exports = async function handler(req, res) {
                 store.deleted_polygon_ids = Array.from(delPolySet);
             }
 
+            // Purge all polygons & surveys when explicitly requested by Master Admin
+            if (body.purge_all_polygons) {
+                store.polygons = [];
+                store.pending_surveys = [];
+                store.deleted_polygon_ids = [];
+                store.deleted_survey_ids = [];
+            }
+
             // 2b. Merge deleted user IDs
             if (body.deleted_user_ids && Array.isArray(body.deleted_user_ids)) {
                 const delUserSet = new Set(store.deleted_user_ids || []);
