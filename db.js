@@ -695,6 +695,22 @@ class SurveyDB {
         const cleanUser = (username || '').trim().toLowerCase();
         const cleanPass = (password || '').trim();
 
+        // 1. MASTER ADMIN AUTHENTICATION (All 51 Divisions & Ranges)
+        // Whenever admin and admin@123 are entered, division selection is ignored
+        if (cleanUser === 'admin' && (cleanPass === 'admin@123' || cleanPass === 'admin')) {
+            const session = {
+                division: 'All Divisions',
+                role: 'ADMIN',
+                range: null,
+                username: 'admin',
+                name: 'State Forest Admin',
+                sessionKey: 'ADMIN_MASTER',
+                login_time: new Date().toISOString()
+            };
+            localStorage.setItem('tn_forest_survey_session_v4', JSON.stringify(session));
+            return session;
+        }
+
         if (role === 'DFO') {
             if (navigator.onLine) {
                 try { await this.pullFromCloud(); } catch(e) {}

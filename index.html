@@ -32,7 +32,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=21').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=22').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -226,25 +226,6 @@
                     <div><span class="dot-legend dot-red"></span> <b>Red Flashing Points:</b> Need field GPS ground verification</div>
                     <div><span class="dot-legend dot-blue"></span> <b>Blue Points:</b> Standard verified boundary cairns</div>
                     <div style="margin-top: 4px; color: #94a3b8;"><i class="fa-solid fa-circle-info"></i> <b>Tip:</b> Click any boundary line to insert in-between sub-points (6a, 6b...) or drag markers to shift.</div>
-                </div>
-
-                <!-- Master KML Upload Box -->
-                <div class="upload-section-card">
-                    <div class="section-subtitle"><i class="fa-solid fa-cloud-arrow-up"></i> Load New KML to Database</div>
-                    <div class="form-group">
-                        <label>Target Range for KML</label>
-                        <select id="uploadRangeSelect" class="form-control">
-                            <!-- Populated dynamically -->
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Boundary / File Name</label>
-                        <input type="text" id="uploadBoundaryName" class="form-control" placeholder="e.g. Pallikaranai RF Block 1">
-                    </div>
-                    <label for="kmlFileInput" class="btn-primary btn-block">
-                        <i class="fa-solid fa-file-import"></i> Choose KML / GeoJSON File
-                    </label>
-                    <input type="file" id="kmlFileInput" accept=".kml,.geojson,.json" style="display: none;">
                 </div>
 
                 <!-- Submissions from Field Officers (Pending Review) -->
@@ -522,6 +503,194 @@
                     </button>
                 </div>
             </div>
+
+            <!-- Mode 3: Master Admin Command Center (Statewide 51 Divisions) -->
+            <div id="adminPanel" class="role-panel" style="display: none;">
+                <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="fa-solid fa-crown text-amber"></i> Master Admin Portal</span>
+                    <span class="badge-role-admin">STATE HQ</span>
+                </div>
+
+                <!-- Division and Statewide Scope Info -->
+                <div class="division-badge-card admin-scope-card">
+                    <div>Jurisdiction: <b class="text-amber">All 51 Forest Divisions</b></div>
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Central Survey Management &amp; Two-Stage Verification</div>
+                </div>
+
+                <!-- KPI Metrics Summary Grid -->
+                <div class="admin-kpi-grid">
+                    <div class="admin-kpi-card">
+                        <div class="kpi-num" id="kpiTotalRfs">0</div>
+                        <div class="kpi-label">Total Uploaded</div>
+                    </div>
+                    <div class="admin-kpi-card stage1-pending-kpi">
+                        <div class="kpi-num text-amber" id="kpiStage1Pending">0</div>
+                        <div class="kpi-label">Stage 1 Pending</div>
+                    </div>
+                    <div class="admin-kpi-card stage1-done-kpi">
+                        <div class="kpi-num text-cyan" id="kpiStage1Done">0</div>
+                        <div class="kpi-label">Stage 1 Done</div>
+                    </div>
+                    <div class="admin-kpi-card stage2-pending-kpi">
+                        <div class="kpi-num text-orange" id="kpiStage2Pending">0</div>
+                        <div class="kpi-label">Stage 2 Pending</div>
+                    </div>
+                    <div class="admin-kpi-card stage2-done-kpi">
+                        <div class="kpi-num text-emerald" id="kpiStage2Done">0</div>
+                        <div class="kpi-label">Fully Finalized</div>
+                    </div>
+                </div>
+
+                <!-- Admin Action Navigation Tabs -->
+                <div class="admin-nav-tabs">
+                    <button type="button" id="tabAdminUpload" class="btn-admin-tab active" onclick="switchAdminTab('UPLOAD')">
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Upload Master KML
+                    </button>
+                    <button type="button" id="tabAdminMonitor" class="btn-admin-tab" onclick="switchAdminTab('MONITOR')">
+                        <i class="fa-solid fa-list-check"></i> 51 Divisions Matrix
+                    </button>
+                    <button type="button" id="tabAdminExport" class="btn-admin-tab" onclick="switchAdminTab('EXPORT')">
+                        <i class="fa-solid fa-file-export"></i> Export Reports
+                    </button>
+                </div>
+
+                <!-- SUBSECTION 1: UPLOAD MASTER KML TO DIVISION -->
+                <div id="adminUploadSection" class="admin-tab-content">
+                    <div class="upload-section-card admin-upload-card">
+                        <div class="section-subtitle"><i class="fa-solid fa-file-arrow-up"></i> Upload Master Baseline KML</div>
+                        <div class="form-group">
+                            <label>Target Forest Division (1 of 51)</label>
+                            <select id="adminUploadDivisionSelect" class="form-control" onchange="onAdminUploadDivisionChange()">
+                                <!-- Populated dynamically with all 51 divisions -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Target Range in Division</label>
+                            <select id="adminUploadRangeSelect" class="form-control">
+                                <!-- Populated dynamically based on division -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>RF / RL Boundary Name</label>
+                            <input type="text" id="adminUploadBoundaryName" class="form-control" placeholder="e.g. Vellore RF Block 1">
+                        </div>
+                        <div class="upload-file-btn-wrapper" style="margin-top: 10px;">
+                            <label for="adminKmlFileInput" class="btn-primary btn-block btn-lg" style="text-align: center; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                <i class="fa-solid fa-file-import"></i> Choose Master KML / GeoJSON File
+                            </label>
+                            <input type="file" id="adminKmlFileInput" accept=".kml,.geojson,.json" style="display: none;" onchange="handleAdminKmlFileUpload(event)">
+                        </div>
+                        <div class="upload-hint-box" style="margin-top: 10px; font-size: 11px; color: #94a3b8; line-height: 1.4; background: rgba(56, 189, 248, 0.08); padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.2);">
+                            <i class="fa-solid fa-circle-info text-cyan"></i> <b>Workflow Routing:</b> Uploaded KML is stored as <b>Stage 0 Baseline</b> and instantly routed to the DFO of this division and all assigned field staff.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SUBSECTION 2: 51 DIVISIONS BOUNDARY MATRIX & 2-STAGE MONITORING -->
+                <div id="adminMonitorSection" class="admin-tab-content" style="display: none;">
+                    <div class="matrix-filter-card" style="background: rgba(15, 23, 42, 0.6); padding: 10px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                        <div class="form-group" style="margin-bottom: 6px;">
+                            <label>Filter by Division</label>
+                            <select id="adminFilterDivision" class="form-control" onchange="onAdminFilterDivisionChange()">
+                                <option value="ALL">All 51 Divisions</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 6px;">
+                            <label>Filter by Range</label>
+                            <select id="adminFilterRange" class="form-control" onchange="filterAdminBoundaries()">
+                                <option value="ALL">All Ranges</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 6px;">
+                            <label>Filter by Verification Stage</label>
+                            <select id="adminFilterStage" class="form-control" onchange="filterAdminBoundaries()">
+                                <option value="ALL">All Verification Stages</option>
+                                <option value="STAGE_1_PENDING">Stage 1 Pending (Field Survey Pending)</option>
+                                <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done &bull; Stage 2 Pending (In DFO Queue)</option>
+                                <option value="STAGE_2_DONE">Stage 2 Finalized (Fully Completed)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <input type="text" id="adminSearchInput" class="form-control" placeholder="Search RF name, range, division..." oninput="filterAdminBoundaries()">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 10px 0 6px 0;">
+                        <span style="font-size: 12px; font-weight: 700; color: #cbd5e1;">Boundaries Matrix (<span id="adminFilteredCount">0</span>)</span>
+                        <button type="button" class="btn-sync-cloud-mini" onclick="handleGlobalForceRefresh()" title="Sync Cloud" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">
+                            <i class="fa-solid fa-arrows-rotate"></i> Sync Cloud
+                        </button>
+                    </div>
+
+                    <!-- Boundaries List -->
+                    <div id="adminBoundariesList" class="admin-boundary-list">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- SUBSECTION 3: CUSTOMIZABLE EXCEL & PDF EXPORT -->
+                <div id="adminExportSection" class="admin-tab-content" style="display: none;">
+                    <div class="export-config-card" style="background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                        <div class="section-subtitle" style="margin-bottom: 8px;"><i class="fa-solid fa-sliders text-cyan"></i> Export Filter &amp; Column Selection</div>
+                        
+                        <div class="form-group">
+                            <label>Select Stage Filter</label>
+                            <select id="exportStageFilter" class="form-control">
+                                <option value="ALL">All Uploaded RF/RL Boundaries</option>
+                                <option value="PENDING">All Pending (Stage 1 or Stage 2 Pending)</option>
+                                <option value="STAGE_1_DONE">Stage 1 Completed List</option>
+                                <option value="STAGE_1_DONE_STAGE_2_PENDING">Stage 1 Done but Stage 2 Pending (In DFO Queue)</option>
+                                <option value="STAGE_2_DONE">Fully Completed List (Stage 1 &amp; Stage 2 Finalized)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Select Division Scope</label>
+                            <select id="exportDivisionFilter" class="form-control">
+                                <option value="ALL">All 51 Divisions</option>
+                            </select>
+                        </div>
+
+                        <div class="column-picker-box" style="margin-top: 10px; background: rgba(2, 6, 23, 0.5); padding: 10px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.1);">
+                            <div class="column-picker-title" style="font-size: 11px; font-weight: 700; color: #38bdf8; margin-bottom: 6px;">Choose Columns to Include in Report:</div>
+                            <div class="column-checkboxes-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; color: #cbd5e1;">
+                                <label><input type="checkbox" id="colDivision" checked> Division Name</label>
+                                <label><input type="checkbox" id="colRange" checked> Range Name</label>
+                                <label><input type="checkbox" id="colName" checked> RF / RL Name</label>
+                                <label><input type="checkbox" id="colArea" checked> Total Area (Ha)</label>
+                                <label><input type="checkbox" id="colCairns" checked> Cairns Count</label>
+                                <label><input type="checkbox" id="colBaselineDate" checked> Baseline Upload Date</label>
+                                <label><input type="checkbox" id="colStage1Status" checked> Stage 1 Status</label>
+                                <label><input type="checkbox" id="colStage1Officer" checked> Field Officer</label>
+                                <label><input type="checkbox" id="colStage1Date" checked> Stage 1 Date</label>
+                                <label><input type="checkbox" id="colStage2Status" checked> Stage 2 Status</label>
+                                <label><input type="checkbox" id="colStage2Date" checked> DFO Approval Date</label>
+                                <label><input type="checkbox" id="colDisputeCount" checked> Flagged Dispute Points</label>
+                            </div>
+                        </div>
+
+                        <div class="export-action-buttons" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px;">
+                            <button type="button" class="btn-success btn-lg" onclick="handleAdminExportExcel()" style="padding: 10px; font-size: 11px; font-weight: 700;">
+                                <i class="fa-solid fa-file-excel"></i> Export Excel (.xlsx/CSV)
+                            </button>
+                            <button type="button" class="btn-primary btn-lg" onclick="handleAdminExportPdf()" style="padding: 10px; font-size: 11px; font-weight: 700; background: #dc2626; border-color: #ef4444;">
+                                <i class="fa-solid fa-file-pdf"></i> Export PDF Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mobile App APK Download Block (Admin Portal) -->
+                <div class="apk-download-box" style="margin-top: 15px;">
+                    <button type="button" class="btn-download-apk-block" onclick="handleInstallApp()" title="Install App">
+                        <i class="fa-brands fa-android apk-icon-large"></i>
+                        <div class="apk-btn-text">
+                            <span class="apk-btn-title">Install Mobile App (TN RFRL Survey)</span>
+                            <span class="apk-btn-sub">Tap to Add to Android Home Screen &bull; Offline Ready</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Map Area (Takes full remaining space) -->
@@ -787,6 +956,81 @@
             </div>
             <div class="modal-footer" style="display: flex; justify-content: flex-end;">
                 <button class="btn-primary" onclick="closeInstallGuideModal()">Understood</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3-Way Survey Stage Audit Comparison Modal (Admin Portal) -->
+    <div id="adminCompareModal" class="custom-modal" style="display: none;">
+        <div class="modal-content" style="max-width: 900px; width: 95%;">
+            <div class="modal-header">
+                <div>
+                    <h3 style="margin: 0; color: #38bdf8; font-size: 16px;"><i class="fa-solid fa-code-compare"></i> 3-Way Survey Stage Comparison &amp; Audit</h3>
+                    <div id="compareModalSubtitle" style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">Comparing Stage 0 Baseline vs Stage 1 Field vs Stage 2 DFO Final</div>
+                </div>
+                <button class="modal-close" onclick="closeAdminCompareModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 14px;">
+                <!-- Layer Toggles -->
+                <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; background: rgba(15, 23, 42, 0.7); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <span style="font-size: 11px; font-weight: 700; color: #cbd5e1; align-self: center;">Map Layers:</span>
+                    <label style="font-size: 11px; color: #fbbf24; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                        <input type="checkbox" id="toggleCompareBaseline" checked onchange="toggleCompareMapLayers()">
+                        <span style="width: 10px; height: 10px; border-radius: 50%; background: #fbbf24; display: inline-block;"></span> Stage 0 Baseline (Amber)
+                    </label>
+                    <label style="font-size: 11px; color: #38bdf8; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                        <input type="checkbox" id="toggleCompareStage1" checked onchange="toggleCompareMapLayers()">
+                        <span style="width: 10px; height: 10px; border-radius: 50%; background: #38bdf8; display: inline-block;"></span> Stage 1 Field Edit (Cyan)
+                    </label>
+                    <label style="font-size: 11px; color: #34d399; cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                        <input type="checkbox" id="toggleCompareStage2" checked onchange="toggleCompareMapLayers()">
+                        <span style="width: 10px; height: 10px; border-radius: 50%; background: #34d399; display: inline-block;"></span> Stage 2 DFO Final (Green)
+                    </label>
+                </div>
+
+                <!-- 3 Columns Stage Comparison Cards -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px;">
+                    <!-- Baseline -->
+                    <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 8px; padding: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <b style="color: #fbbf24; font-size: 12px;"><i class="fa-solid fa-flag"></i> Stage 0: Baseline</b>
+                            <span style="font-size: 9.5px; background: rgba(251, 191, 36, 0.15); color: #fbbf24; padding: 2px 6px; border-radius: 4px;">Original KML</span>
+                        </div>
+                        <div id="compareBaselineMeta" style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 8px;">—</div>
+                        <div id="compareBaselineCoords" style="max-height: 140px; overflow-y: auto; font-family: monospace; font-size: 10px; background: rgba(2, 6, 23, 0.6); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); color: #94a3b8;"></div>
+                    </div>
+
+                    <!-- Stage 1 Field -->
+                    <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <b style="color: #38bdf8; font-size: 12px;"><i class="fa-solid fa-person-walking"></i> Stage 1: Field Edit</b>
+                            <span id="compareStage1Badge" style="font-size: 9.5px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px;">Pending</span>
+                        </div>
+                        <div id="compareStage1Meta" style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 8px;">—</div>
+                        <div id="compareStage1Coords" style="max-height: 140px; overflow-y: auto; font-family: monospace; font-size: 10px; background: rgba(2, 6, 23, 0.6); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); color: #94a3b8;"></div>
+                    </div>
+
+                    <!-- Stage 2 DFO -->
+                    <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 8px; padding: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <b style="color: #34d399; font-size: 12px;"><i class="fa-solid fa-shield-halved"></i> Stage 2: DFO Final</b>
+                            <span id="compareStage2Badge" style="font-size: 9.5px; background: rgba(52, 211, 153, 0.15); color: #34d399; padding: 2px 6px; border-radius: 4px;">Pending</span>
+                        </div>
+                        <div id="compareStage2Meta" style="font-size: 11px; color: #cbd5e1; line-height: 1.5; margin-bottom: 8px;">—</div>
+                        <div id="compareStage2Coords" style="max-height: 140px; overflow-y: auto; font-family: monospace; font-size: 10px; background: rgba(2, 6, 23, 0.6); padding: 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05); color: #94a3b8;"></div>
+                    </div>
+                </div>
+
+                <!-- Finalized KML Download Bar -->
+                <div style="background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div id="compareFinalKmlStatus" style="font-size: 11.5px; font-weight: 600;"></div>
+                    <button type="button" id="btnCompareDownloadFinalKml" class="btn-success btn-lg" onclick="downloadFinalizedKmlFromCompare()" style="padding: 8px 16px; font-size: 12px; font-weight: 700;">
+                        <i class="fa-solid fa-download"></i> Download Finalized KML
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end;">
+                <button class="btn-secondary" onclick="closeAdminCompareModal()">Close Audit Window</button>
             </div>
         </div>
     </div>

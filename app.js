@@ -447,15 +447,17 @@ async function checkAuthSession() {
     currentDivision = user.division;
     currentRange = user.range;
 
-    document.getElementById('userRoleBadge').textContent = user.role === 'DFO' ? 'DFO' : 'FIELD';
-    document.getElementById('userDivisionName').textContent = user.role === 'DFO' ? user.division : `${user.division} (${user.range})`;
-    document.getElementById('headerPortalSubtitle').textContent = user.role === 'DFO' ? `DFO MASTER PORTAL — ${user.division.toUpperCase()}` : `FIELD SURVEY PORTAL — ${user.range ? user.range.toUpperCase() : ''}`;
+    document.getElementById('userRoleBadge').textContent = user.role === 'ADMIN' ? 'ADMIN' : (user.role === 'DFO' ? 'DFO' : 'FIELD');
+    document.getElementById('userDivisionName').textContent = user.role === 'ADMIN' ? 'All 51 Divisions' : (user.role === 'DFO' ? user.division : `${user.division} (${user.range})`);
+    document.getElementById('headerPortalSubtitle').textContent = user.role === 'ADMIN' ? 'MASTER STATE ADMIN DASHBOARD' : (user.role === 'DFO' ? `DFO MASTER PORTAL — ${user.division.toUpperCase()}` : `FIELD SURVEY PORTAL — ${user.range ? user.range.toUpperCase() : ''}`);
     const logoutUserEl = document.getElementById('sidebarLogoutUser');
     if (logoutUserEl) {
-        logoutUserEl.textContent = user.role === 'DFO' ? `DFO ${user.division}` : `${user.username}`;
+        logoutUserEl.textContent = user.role === 'ADMIN' ? 'Admin (Master)' : (user.role === 'DFO' ? `DFO ${user.division}` : `${user.username}`);
     }
 
-    if (user.role === 'DFO') {
+    if (user.role === 'ADMIN') {
+        await setupAdminPortal();
+    } else if (user.role === 'DFO') {
         await setupDfoPortal();
     } else {
         await setupFieldPortal();
@@ -544,6 +546,7 @@ async function setupDfoPortal() {
         try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
     document.getElementById('dfoPanel').style.display = 'block';
+    if (document.getElementById('adminPanel')) document.getElementById('adminPanel').style.display = 'none';
     if (window.dfoAutoSyncTimer) {
         clearInterval(window.dfoAutoSyncTimer);
         window.dfoAutoSyncTimer = null;
@@ -555,7 +558,7 @@ async function setupDfoPortal() {
     const rangeSelect = document.getElementById('dfoRangeSelect');
     const uploadRangeSelect = document.getElementById('uploadRangeSelect');
     rangeSelect.innerHTML = '<option value="ALL">All Ranges in Division</option>';
-    uploadRangeSelect.innerHTML = '';
+    if (uploadRangeSelect) uploadRangeSelect.innerHTML = '';
 
     const ranges = window.TN_FOREST_HIERARCHY[currentDivision] || [];
     ranges.forEach(r => {
@@ -564,10 +567,12 @@ async function setupDfoPortal() {
         opt1.textContent = `${r} Range`;
         rangeSelect.appendChild(opt1);
 
-        const opt2 = document.createElement('option');
-        opt2.value = r;
-        opt2.textContent = `${r} Range`;
-        uploadRangeSelect.appendChild(opt2);
+        if (uploadRangeSelect) {
+            const opt2 = document.createElement('option');
+            opt2.value = r;
+            opt2.textContent = `${r} Range`;
+            uploadRangeSelect.appendChild(opt2);
+        }
     });
 
     await loadDfoBoundaries();
@@ -1174,80 +1179,85 @@ async function deleteCurrentBoundary() {
     }
 }
 
-// DFO KML Upload Handler
-document.getElementById('kmlFileInput').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+// DFO KML Upload Handler (Legacy fallback, KML uploading is now centralized in Master Admin Portal)
+const dfoKmlInput = document.getElementById('kmlFileInput');
+if (dfoKmlInput) {
+    dfoKmlInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
-    const targetRange = document.getElementById('uploadRangeSelect').value;
-    let bName = document.getElementById('uploadBoundaryName').value.trim();
-    if (!bName) bName = file.name.replace(/\.[^/.]+$/, "");
+        const uploadRangeEl = document.getElementById('uploadRangeSelect');
+        const targetRange = uploadRangeEl ? uploadRangeEl.value : '';
+        const uploadNameEl = document.getElementById('uploadBoundaryName');
+        let bName = uploadNameEl ? uploadNameEl.value.trim() : '';
+        if (!bName) bName = file.name.replace(/\.[^/.]+$/, "");
 
-    const text = await file.text();
-    let coords = [];
+        const text = await file.text();
+        let coords = [];
 
-    if (file.name.toLowerCase().endsWith('.kml')) {
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, 'text/xml');
-        const cNode = xml.querySelector('coordinates');
-        if (cNode) {
-            coords = cNode.textContent.trim().split(/\s+/).map(pair => {
-                const parts = pair.split(',');
-                return [parseFloat(parts[0]), parseFloat(parts[1])];
-            }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
+        if (file.name.toLowerCase().endsWith('.kml')) {
+            const parser = new DOMParser();
+            const xml = parser.parseFromString(text, 'text/xml');
+            const cNode = xml.querySelector('coordinates');
+            if (cNode) {
+                coords = cNode.textContent.trim().split(/\s+/).map(pair => {
+                    const parts = pair.split(',');
+                    return [parseFloat(parts[0]), parseFloat(parts[1])];
+                }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
+            }
+        } else {
+            const geo = JSON.parse(text);
+            if (geo.features && geo.features[0].geometry.coordinates) {
+                coords = geo.features[0].geometry.coordinates[0];
+            }
         }
-    } else {
-        const geo = JSON.parse(text);
-        if (geo.features && geo.features[0].geometry.coordinates) {
-            coords = geo.features[0].geometry.coordinates[0];
+
+        if (coords.length < 3) {
+            alert('Invalid KML/GeoJSON geometry: polygon must contain at least 3 coordinates.');
+            return;
         }
-    }
 
-    if (coords.length < 3) {
-        alert('Invalid KML/GeoJSON geometry: polygon must contain at least 3 coordinates.');
-        return;
-    }
+        // Strictly overwrite existing RF if name matches in this division (NO duplicate RFs)
+        const allPolys = await window.surveyDB.getAll('polygons');
+        const cleanBName = bName.trim();
+        const existing = allPolys.find(p => 
+            (p.division || '').toLowerCase() === currentDivision.toLowerCase() &&
+            (p.name || '').trim().toLowerCase() === cleanBName.toLowerCase()
+        );
 
-    // Strictly overwrite existing RF if name matches in this division (NO duplicate RFs)
-    const allPolys = await window.surveyDB.getAll('polygons');
-    const cleanBName = bName.trim();
-    const existing = allPolys.find(p => 
-        (p.division || '').toLowerCase() === currentDivision.toLowerCase() &&
-        (p.name || '').trim().toLowerCase() === cleanBName.toLowerCase()
-    );
+        let polyToSave;
+        if (existing) {
+            existing.range = targetRange;
+            existing.coordinates = coords;
+            existing.flaggedVertices = [];
+            existing.updated_at = new Date().toISOString();
+            polyToSave = existing;
+        } else {
+            polyToSave = {
+                id: `RF_${currentDivision.replace(/\s+/g, '_')}_${Date.now()}`,
+                name: cleanBName,
+                division: currentDivision,
+                range: targetRange,
+                type: 'RF',
+                status: 'OFFICIAL',
+                coordinates: coords,
+                flaggedVertices: [],
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+        }
 
-    let polyToSave;
-    if (existing) {
-        existing.range = targetRange;
-        existing.coordinates = coords;
-        existing.flaggedVertices = [];
-        existing.updated_at = new Date().toISOString();
-        polyToSave = existing;
-    } else {
-        polyToSave = {
-            id: `RF_${currentDivision.replace(/\s+/g, '_')}_${Date.now()}`,
-            name: cleanBName,
-            division: currentDivision,
-            range: targetRange,
-            type: 'RF',
-            status: 'OFFICIAL',
-            coordinates: coords,
-            flaggedVertices: [],
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-        };
-    }
+        await window.surveyDB.put('polygons', polyToSave);
+        if (navigator.onLine && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud().catch(() => {});
+        }
+        alert(`Successfully saved "${bName}" under ${targetRange} Range to ${currentDivision} database!`);
 
-    await window.surveyDB.put('polygons', polyToSave);
-    if (navigator.onLine && window.surveyDB.syncCloud) {
-        await window.surveyDB.syncCloud().catch(() => {});
-    }
-    alert(`Successfully saved "${bName}" under ${targetRange} Range to ${currentDivision} database!`);
-
-    document.getElementById('uploadBoundaryName').value = '';
-    e.target.value = '';
-    await loadDfoBoundaries();
-});
+        if (uploadNameEl) uploadNameEl.value = '';
+        e.target.value = '';
+        await loadDfoBoundaries();
+    });
+}
 
 // Load submissions sent by field officers
 
@@ -1378,13 +1388,25 @@ async function acceptFieldSurvey(surveyId) {
 
     let targetId = survey.targetPolygonId;
     let savedPoly = null;
+    const nowIso = new Date().toISOString();
 
     if (survey.is_revision && targetId) {
         // OVERWRITE existing official boundary in database!
         const existing = await window.surveyDB.get('polygons', targetId);
         if (existing) {
+            if (!existing.originalCoordinates) {
+                existing.originalCoordinates = JSON.parse(JSON.stringify(existing.coordinates));
+            }
             existing.coordinates = survey.coordinates;
-            existing.updated_at = new Date().toISOString();
+            existing.stage1Coordinates = existing.stage1Coordinates || survey.coordinates;
+            existing.stage2Coordinates = JSON.parse(JSON.stringify(survey.coordinates));
+            existing.stage = 'STAGE_2_DONE';
+            existing.stage1_status = 'COMPLETED';
+            existing.stage2_status = 'COMPLETED';
+            existing.stage2_dfo = `DFO (${survey.division})`;
+            existing.stage2_at = nowIso;
+            existing.finalized = true;
+            existing.updated_at = nowIso;
             existing.status = 'OFFICIAL';
             savedPoly = existing;
             await window.surveyDB.put('polygons', existing);
@@ -1401,10 +1423,21 @@ async function acceptFieldSurvey(surveyId) {
         );
 
         if (existingByName) {
+            if (!existingByName.originalCoordinates) {
+                existingByName.originalCoordinates = JSON.parse(JSON.stringify(existingByName.coordinates));
+            }
             existingByName.coordinates = survey.coordinates;
+            existingByName.stage1Coordinates = existingByName.stage1Coordinates || survey.coordinates;
+            existingByName.stage2Coordinates = JSON.parse(JSON.stringify(survey.coordinates));
+            existingByName.stage = 'STAGE_2_DONE';
+            existingByName.stage1_status = 'COMPLETED';
+            existingByName.stage2_status = 'COMPLETED';
+            existingByName.stage2_dfo = `DFO (${survey.division})`;
+            existingByName.stage2_at = nowIso;
+            existingByName.finalized = true;
             existingByName.range = survey.range;
             existingByName.status = 'OFFICIAL';
-            existingByName.updated_at = new Date().toISOString();
+            existingByName.updated_at = nowIso;
             savedPoly = existingByName;
             await window.surveyDB.put('polygons', existingByName);
         } else {
@@ -1415,10 +1448,21 @@ async function acceptFieldSurvey(surveyId) {
                 range: survey.range,
                 type: 'RF',
                 status: 'OFFICIAL',
+                stage: 'STAGE_2_DONE',
+                stage1_status: 'COMPLETED',
+                stage1_officer: survey.submitted_by || 'Field Staff',
+                stage1_at: survey.submitted_at || nowIso,
+                stage1Coordinates: survey.coordinates,
+                stage2_status: 'COMPLETED',
+                stage2_dfo: `DFO (${survey.division})`,
+                stage2_at: nowIso,
+                stage2Coordinates: survey.coordinates,
+                finalized: true,
+                originalCoordinates: JSON.parse(JSON.stringify(survey.coordinates)),
                 coordinates: survey.coordinates,
                 flaggedVertices: [],
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                created_at: nowIso,
+                updated_at: nowIso
             };
             await window.surveyDB.put('polygons', savedPoly);
         }
@@ -1986,6 +2030,9 @@ window.submitFieldRfRevision = async function() {
     const user = window.surveyDB.getCurrentUser();
     const cl = [...fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.coordinates[0]];
     const areaHa = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+    const cleanCoords = fieldActiveBoundaryData.coordinates.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]);
+    const officerName = user ? (user.name || user.username) : 'Field Officer';
+    const nowIso = new Date().toISOString();
 
     const revision = {
         id: `REV_${fieldActiveBoundaryData.id}_${Date.now()}`,
@@ -1994,18 +2041,34 @@ window.submitFieldRfRevision = async function() {
         division: currentDivision,
         range: currentRange,
         is_revision: true,
-        coordinates: fieldActiveBoundaryData.coordinates.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]),
+        coordinates: cleanCoords,
         area_ha: areaHa,
-        submitted_by: user ? (user.name || user.username) : 'Field Officer',
-        submitted_at: new Date().toISOString()
+        submitted_by: officerName,
+        submitted_at: nowIso
     };
+
+    // Update Stage 1 state on the official polygon record
+    const officialPoly = await window.surveyDB.get('polygons', fieldActiveBoundaryData.id);
+    if (officialPoly) {
+        if (!officialPoly.originalCoordinates) {
+            officialPoly.originalCoordinates = JSON.parse(JSON.stringify(officialPoly.coordinates || cleanCoords));
+        }
+        officialPoly.stage = 'STAGE_1_DONE_STAGE_2_PENDING';
+        officialPoly.stage1_status = 'COMPLETED';
+        officialPoly.stage1_officer = officerName;
+        officialPoly.stage1_at = nowIso;
+        officialPoly.stage1Coordinates = cleanCoords;
+        officialPoly.stage2_status = 'PENDING';
+        officialPoly.updated_at = nowIso;
+        await window.surveyDB.put('polygons', officialPoly);
+    }
 
     await window.surveyDB.put('pending_surveys', revision);
     if (navigator.onLine && window.surveyDB.syncCloud) {
         await window.surveyDB.syncCloud().catch(() => {});
     }
 
-    alert(`Edited RF Boundary "${fieldActiveBoundaryData.name}" (${revision.coordinates.length} cairns, ${areaHa} Ha) submitted to ${currentDivision} DFO for verification!`);
+    alert(`Stage 1 Field Survey for "${fieldActiveBoundaryData.name}" (${cleanCoords.length} cairns, ${areaHa} Ha) submitted to ${currentDivision} DFO for Stage 2 verification!`);
 };
 
 async function setupFieldPortal() {
@@ -2013,6 +2076,7 @@ async function setupFieldPortal() {
         try { await window.surveyDB.pullFromCloud(); } catch(e) {}
     }
     document.getElementById('dfoPanel').style.display = 'none';
+    if (document.getElementById('adminPanel')) document.getElementById('adminPanel').style.display = 'none';
     document.getElementById('fieldPanel').style.display = 'block';
 
     document.getElementById('fieldDivisionTitle').textContent = currentDivision;
@@ -2756,6 +2820,8 @@ window.handleGlobalForceRefresh = async function() {
                     renderActiveBoundary(false);
                 }
             }
+        } else if (user && user.role === 'ADMIN') {
+            await loadAdminDashboard();
         } else if (user && user.role === 'FIELD_OFFICER') {
             await loadFieldAssignedBoundaries(false);
             if (fieldActiveBoundaryData && fieldActiveBoundaryData.id) {
@@ -2780,4 +2846,817 @@ window.handleGlobalForceRefresh = async function() {
             icons.forEach(ic => ic.classList.remove('fa-spin'));
         }, 600);
     }
+};
+
+// =========================================================================
+// MASTER ADMIN PORTAL & TWO-STAGE VERIFICATION WORKFLOW ENGINE
+// =========================================================================
+
+let adminAllPolygonsCache = [];
+let currentAuditPolygon = null;
+let auditBaselineLayer = null;
+let auditStage1Layer = null;
+let auditStage2Layer = null;
+
+async function setupAdminPortal() {
+    clearActiveBoundaryMap();
+    if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        try { await window.surveyDB.pullFromCloud(); } catch(e) {}
+    }
+    document.getElementById('dfoPanel').style.display = 'none';
+    document.getElementById('fieldPanel').style.display = 'none';
+    document.getElementById('adminPanel').style.display = 'block';
+
+    populateAdminDivisionSelects();
+    await loadAdminDashboard();
+
+    const mapInfo = document.getElementById('activeMapInfo');
+    if (mapInfo) mapInfo.textContent = 'Master Admin — All 51 Forest Divisions';
+}
+
+function populateAdminDivisionSelects() {
+    const uploadDivSelect = document.getElementById('adminUploadDivisionSelect');
+    const filterDivSelect = document.getElementById('adminFilterDivision');
+    const exportDivSelect = document.getElementById('exportDivisionFilter');
+
+    if (!uploadDivSelect || !window.TN_FOREST_HIERARCHY) return;
+
+    const divisions = Object.keys(window.TN_FOREST_HIERARCHY).sort();
+
+    uploadDivSelect.innerHTML = '<option value="">-- Select Target Division --</option>';
+    divisions.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = d;
+        uploadDivSelect.appendChild(opt);
+    });
+
+    if (filterDivSelect) {
+        filterDivSelect.innerHTML = '<option value="ALL">All 51 Divisions</option>';
+        divisions.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            filterDivSelect.appendChild(opt);
+        });
+    }
+
+    if (exportDivSelect) {
+        exportDivSelect.innerHTML = '<option value="ALL">All 51 Divisions</option>';
+        divisions.forEach(d => {
+            const opt = document.createElement('option');
+            opt.value = d;
+            opt.textContent = d;
+            exportDivSelect.appendChild(opt);
+        });
+    }
+
+    onAdminUploadDivisionChange();
+    onAdminFilterDivisionChange();
+}
+
+window.onAdminUploadDivisionChange = function() {
+    const divSelect = document.getElementById('adminUploadDivisionSelect');
+    const rangeSelect = document.getElementById('adminUploadRangeSelect');
+    if (!divSelect || !rangeSelect) return;
+
+    const div = divSelect.value;
+    rangeSelect.innerHTML = '';
+
+    if (!div || !window.TN_FOREST_HIERARCHY[div]) {
+        rangeSelect.innerHTML = '<option value="">-- Select Division First --</option>';
+        return;
+    }
+
+    const ranges = window.TN_FOREST_HIERARCHY[div];
+    ranges.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r;
+        opt.textContent = `${r} Range`;
+        rangeSelect.appendChild(opt);
+    });
+};
+
+window.onAdminFilterDivisionChange = function() {
+    const divSelect = document.getElementById('adminFilterDivision');
+    const rangeSelect = document.getElementById('adminFilterRange');
+    if (!divSelect || !rangeSelect) return;
+
+    const div = divSelect.value;
+    rangeSelect.innerHTML = '<option value="ALL">All Ranges</option>';
+
+    if (div && div !== 'ALL' && window.TN_FOREST_HIERARCHY[div]) {
+        const ranges = window.TN_FOREST_HIERARCHY[div];
+        ranges.forEach(r => {
+            const opt = document.createElement('option');
+            opt.value = r;
+            opt.textContent = `${r} Range`;
+            rangeSelect.appendChild(opt);
+        });
+    }
+    filterAdminBoundaries();
+};
+
+window.switchAdminTab = function(tab) {
+    document.querySelectorAll('.btn-admin-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.admin-tab-content').forEach(c => c.style.display = 'none');
+
+    if (tab === 'UPLOAD') {
+        const t = document.getElementById('tabAdminUpload');
+        const s = document.getElementById('adminUploadSection');
+        if (t) t.classList.add('active');
+        if (s) s.style.display = 'block';
+    } else if (tab === 'MONITOR') {
+        const t = document.getElementById('tabAdminMonitor');
+        const s = document.getElementById('adminMonitorSection');
+        if (t) t.classList.add('active');
+        if (s) s.style.display = 'block';
+        loadAdminDashboard();
+    } else if (tab === 'EXPORT') {
+        const t = document.getElementById('tabAdminExport');
+        const s = document.getElementById('adminExportSection');
+        if (t) t.classList.add('active');
+        if (s) s.style.display = 'block';
+    }
+};
+
+window.handleAdminKmlFileUpload = async function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const targetDiv = document.getElementById('adminUploadDivisionSelect').value;
+    const targetRange = document.getElementById('adminUploadRangeSelect').value;
+    let bName = document.getElementById('adminUploadBoundaryName').value.trim();
+    if (!bName) bName = file.name.replace(/\.[^/.]+$/, "");
+
+    if (!targetDiv) {
+        alert('Please select a target Forest Division.');
+        return;
+    }
+    if (!targetRange) {
+        alert('Please select a target Range.');
+        return;
+    }
+
+    const text = await file.text();
+    let coords = [];
+
+    if (file.name.toLowerCase().endsWith('.kml')) {
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, 'text/xml');
+        const cNode = xml.querySelector('coordinates');
+        if (cNode) {
+            coords = cNode.textContent.trim().split(/\s+/).map(pair => {
+                const parts = pair.split(',');
+                return [parseFloat(parts[0]), parseFloat(parts[1])];
+            }).filter(c => !isNaN(c[0]) && !isNaN(c[1]));
+        }
+    } else {
+        const geo = JSON.parse(text);
+        if (geo.features && geo.features[0].geometry.coordinates) {
+            coords = geo.features[0].geometry.coordinates[0];
+        }
+    }
+
+    if (coords.length < 3) {
+        alert('Invalid KML/GeoJSON geometry: polygon must contain at least 3 coordinates.');
+        return;
+    }
+
+    const cleanCoords = coords.map(c => [Number(Number(c[0]).toFixed(10)), Number(Number(c[1]).toFixed(10))]);
+    const nowIso = new Date().toISOString();
+
+    // Check if boundary with same name exists in target division (strictly overwrite)
+    const allPolys = await window.surveyDB.getAll('polygons');
+    const cleanBName = bName.trim();
+    const existing = allPolys.find(p => 
+        (p.division || '').toLowerCase() === targetDiv.toLowerCase() &&
+        (p.name || '').trim().toLowerCase() === cleanBName.toLowerCase()
+    );
+
+    let polyToSave;
+    if (existing) {
+        existing.range = targetRange;
+        existing.coordinates = cleanCoords;
+        existing.originalCoordinates = JSON.parse(JSON.stringify(cleanCoords)); // Baseline Stage 0
+        existing.stage = 'STAGE_1_PENDING';
+        existing.stage1_status = 'PENDING';
+        existing.stage2_status = 'PENDING';
+        existing.stage1Coordinates = null;
+        existing.stage2Coordinates = null;
+        existing.flaggedVertices = [];
+        existing.uploaded_by = 'ADMIN';
+        existing.uploaded_at = nowIso;
+        existing.updated_at = nowIso;
+        polyToSave = existing;
+    } else {
+        polyToSave = {
+            id: `RF_${targetDiv.replace(/\s+/g, '_')}_${Date.now()}`,
+            name: cleanBName,
+            division: targetDiv,
+            range: targetRange,
+            type: 'RF',
+            status: 'OFFICIAL',
+            stage: 'STAGE_1_PENDING',
+            stage1_status: 'PENDING',
+            stage2_status: 'PENDING',
+            originalCoordinates: JSON.parse(JSON.stringify(cleanCoords)), // Baseline Stage 0
+            coordinates: cleanCoords,
+            stage1Coordinates: null,
+            stage2Coordinates: null,
+            flaggedVertices: [],
+            uploaded_by: 'ADMIN',
+            uploaded_at: nowIso,
+            created_at: nowIso,
+            updated_at: nowIso
+        };
+    }
+
+    await window.surveyDB.put('polygons', polyToSave);
+    if (navigator.onLine && window.surveyDB.syncCloud) {
+        await window.surveyDB.syncCloud().catch(() => {});
+    }
+
+    alert(`✓ Successfully saved "${cleanBName}" to ${targetDiv} Division (${targetRange} Range)!\n\nThis RF is now routed to ${targetDiv} DFO and field officers for Stage 1 survey.`);
+
+    document.getElementById('adminUploadBoundaryName').value = '';
+    e.target.value = '';
+    await loadAdminDashboard();
+};
+
+async function loadAdminDashboard() {
+    const all = await window.surveyDB.getAll('polygons');
+    adminAllPolygonsCache = all || [];
+
+    let total = adminAllPolygonsCache.length;
+    let s1Pending = 0;
+    let s1Done = 0;
+    let s2Pending = 0;
+    let s2Done = 0;
+
+    adminAllPolygonsCache.forEach(p => {
+        const s1 = p.stage1_status === 'COMPLETED';
+        const s2 = p.stage2_status === 'COMPLETED';
+
+        if (s1) {
+            s1Done++;
+            if (!s2) s2Pending++;
+        } else {
+            s1Pending++;
+        }
+
+        if (s2) s2Done++;
+    });
+
+    const elTotal = document.getElementById('kpiTotalRfs');
+    const elS1P = document.getElementById('kpiStage1Pending');
+    const elS1D = document.getElementById('kpiStage1Done');
+    const elS2P = document.getElementById('kpiStage2Pending');
+    const elS2D = document.getElementById('kpiStage2Done');
+
+    if (elTotal) elTotal.textContent = total;
+    if (elS1P) elS1P.textContent = s1Pending;
+    if (elS1D) elS1D.textContent = s1Done;
+    if (elS2P) elS2P.textContent = s2Pending;
+    if (elS2D) elS2D.textContent = s2Done;
+
+    filterAdminBoundaries();
+}
+
+window.filterAdminBoundaries = function() {
+    const divFilter = (document.getElementById('adminFilterDivision') || {}).value || 'ALL';
+    const rangeFilter = (document.getElementById('adminFilterRange') || {}).value || 'ALL';
+    const stageFilter = (document.getElementById('adminFilterStage') || {}).value || 'ALL';
+    const search = ((document.getElementById('adminSearchInput') || {}).value || '').trim().toLowerCase();
+
+    let list = adminAllPolygonsCache.slice();
+
+    if (divFilter !== 'ALL') {
+        list = list.filter(p => (p.division || '').toLowerCase() === divFilter.toLowerCase());
+    }
+    if (rangeFilter !== 'ALL') {
+        list = list.filter(p => (p.range || '').toLowerCase().includes(rangeFilter.toLowerCase()));
+    }
+    if (stageFilter === 'STAGE_1_PENDING') {
+        list = list.filter(p => p.stage1_status !== 'COMPLETED');
+    } else if (stageFilter === 'STAGE_1_DONE_STAGE_2_PENDING') {
+        list = list.filter(p => p.stage1_status === 'COMPLETED' && p.stage2_status !== 'COMPLETED');
+    } else if (stageFilter === 'STAGE_2_DONE') {
+        list = list.filter(p => p.stage2_status === 'COMPLETED');
+    }
+
+    if (search) {
+        list = list.filter(p => 
+            (p.name || '').toLowerCase().includes(search) ||
+            (p.division || '').toLowerCase().includes(search) ||
+            (p.range || '').toLowerCase().includes(search)
+        );
+    }
+
+    const countEl = document.getElementById('adminFilteredCount');
+    if (countEl) countEl.textContent = list.length;
+
+    renderAdminBoundaryCards(list);
+};
+
+function renderAdminBoundaryCards(list) {
+    const container = document.getElementById('adminBoundariesList');
+    if (!container) return;
+
+    if (list.length === 0) {
+        container.innerHTML = '<div class="empty-hint">No boundaries match the current filter.</div>';
+        return;
+    }
+
+    container.innerHTML = '';
+    list.forEach(p => {
+        const isS1Done = p.stage1_status === 'COMPLETED';
+        const isS2Done = p.stage2_status === 'COMPLETED';
+        const isFullyFinalized = isS1Done && isS2Done;
+
+        let areaHa = '0.00';
+        try {
+            if (p.coordinates && p.coordinates.length >= 3) {
+                const cl = [...p.coordinates, p.coordinates[0]];
+                areaHa = (turf.area(turf.polygon([cl])) / 10000).toFixed(2);
+            }
+        } catch(e) {}
+
+        const card = document.createElement('div');
+        card.className = 'admin-boundary-card';
+        card.innerHTML = `
+            <div class="admin-card-header">
+                <div>
+                    <div class="admin-card-title">${p.name}</div>
+                    <div class="admin-card-loc">${p.division} &bull; ${p.range ? p.range + ' Range' : 'General'}</div>
+                </div>
+                <div style="text-align: right; font-size: 10px; color: #cbd5e1;">
+                    <b style="color: #fbbf24;">${areaHa} Ha</b><br>
+                    <span>${p.coordinates ? p.coordinates.length : 0} cairns</span>
+                </div>
+            </div>
+
+            <div class="admin-card-stages">
+                <div class="stage-pill ${isS1Done ? 'done' : 'pending'}">
+                    <span class="stage-pill-title"><i class="fa-solid ${isS1Done ? 'fa-check-circle' : 'fa-clock'}"></i> Stage 1: ${isS1Done ? 'Completed' : 'Pending'}</span>
+                    <span class="stage-pill-sub">${isS1Done ? (p.stage1_officer || 'Field Staff') : 'Awaiting Field Survey'}</span>
+                </div>
+                <div class="stage-pill ${isS2Done ? 'done' : 'pending'}">
+                    <span class="stage-pill-title"><i class="fa-solid ${isS2Done ? 'fa-check-double' : 'fa-clock'}"></i> Stage 2: ${isS2Done ? 'Finalized' : 'Pending'}</span>
+                    <span class="stage-pill-sub">${isS2Done ? (p.stage2_dfo || 'DFO Approved') : 'In DFO Queue'}</span>
+                </div>
+            </div>
+
+            <div class="admin-card-actions">
+                <button type="button" class="btn-admin-action inspect" onclick="openAdminCompareModal('${p.id}')">
+                    <i class="fa-solid fa-code-compare"></i> Audit &amp; Inspect
+                </button>
+                ${isFullyFinalized ? 
+                    `<button type="button" class="btn-admin-action download-final" onclick="downloadFinalizedKml('${p.id}')">
+                        <i class="fa-solid fa-download"></i> Final KML
+                    </button>` :
+                    `<button type="button" class="btn-admin-action locked" disabled title="Locked: Both Stage 1 (Field) and Stage 2 (DFO) must be completed first">
+                        <i class="fa-solid fa-lock"></i> Locked
+                    </button>`
+                }
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+window.openAdminCompareModal = async function(polyId) {
+    const poly = await window.surveyDB.get('polygons', polyId);
+    if (!poly) return;
+
+    currentAuditPolygon = poly;
+
+    const subEl = document.getElementById('compareModalSubtitle');
+    if (subEl) subEl.textContent = `${poly.name} (${poly.division} &bull; ${poly.range ? poly.range + ' Range' : ''})`;
+
+    const modal = document.getElementById('adminCompareModal');
+    if (modal) modal.style.display = 'flex';
+
+    // Baseline (Stage 0)
+    const baseCoords = poly.originalCoordinates || poly.coordinates || [];
+    let baseArea = '0.00';
+    try {
+        if (baseCoords.length >= 3) {
+            baseArea = (turf.area(turf.polygon([[...baseCoords, baseCoords[0]]])) / 10000).toFixed(2);
+        }
+    } catch(e) {}
+    document.getElementById('compareBaselineMeta').innerHTML = `
+        <div><b>Uploaded By:</b> ${poly.uploaded_by || 'Admin'}</div>
+        <div><b>Date:</b> ${poly.uploaded_at ? new Date(poly.uploaded_at).toLocaleString() : (poly.created_at ? new Date(poly.created_at).toLocaleString() : 'Baseline')}</div>
+        <div><b>Cairns:</b> ${baseCoords.length} points | <b>Area:</b> <span style="color:#fbbf24">${baseArea} Ha</span></div>
+    `;
+    document.getElementById('compareBaselineCoords').innerHTML = baseCoords.map((c, i) => `#${i+1}: [${Number(c[1]).toFixed(7)}, ${Number(c[0]).toFixed(7)}]`).join('<br>');
+
+    // Stage 1 (Field)
+    const s1Coords = poly.stage1Coordinates || (poly.stage1_status === 'COMPLETED' ? poly.coordinates : null);
+    const isS1Done = poly.stage1_status === 'COMPLETED';
+    const s1Badge = document.getElementById('compareStage1Badge');
+    if (s1Badge) {
+        s1Badge.textContent = isS1Done ? 'COMPLETED' : 'PENDING';
+        s1Badge.style.color = isS1Done ? '#38bdf8' : '#fbbf24';
+    }
+    if (s1Coords && s1Coords.length >= 3) {
+        let s1Area = '0.00';
+        try { s1Area = (turf.area(turf.polygon([[...s1Coords, s1Coords[0]]])) / 10000).toFixed(2); } catch(e) {}
+        document.getElementById('compareStage1Meta').innerHTML = `
+            <div><b>Officer:</b> ${poly.stage1_officer || 'Field Staff'}</div>
+            <div><b>Submitted:</b> ${poly.stage1_at ? new Date(poly.stage1_at).toLocaleString() : 'Done'}</div>
+            <div><b>Cairns:</b> ${s1Coords.length} points | <b>Area:</b> <span style="color:#38bdf8">${s1Area} Ha</span></div>
+        `;
+        document.getElementById('compareStage1Coords').innerHTML = s1Coords.map((c, i) => `#${i+1}: [${Number(c[1]).toFixed(7)}, ${Number(c[0]).toFixed(7)}]`).join('<br>');
+    } else {
+        document.getElementById('compareStage1Meta').innerHTML = '<div style="color: #fbbf24;">Awaiting Field Officer ground survey inspection.</div>';
+        document.getElementById('compareStage1Coords').innerHTML = '<span style="color:#64748b;">No field coordinates submitted yet.</span>';
+    }
+
+    // Stage 2 (DFO)
+    const s2Coords = poly.stage2Coordinates || (poly.stage2_status === 'COMPLETED' ? poly.coordinates : null);
+    const isS2Done = poly.stage2_status === 'COMPLETED';
+    const s2Badge = document.getElementById('compareStage2Badge');
+    if (s2Badge) {
+        s2Badge.textContent = isS2Done ? 'FINALIZED' : 'PENDING';
+        s2Badge.style.color = isS2Done ? '#34d399' : '#fbbf24';
+    }
+    if (s2Coords && s2Coords.length >= 3) {
+        let s2Area = '0.00';
+        try { s2Area = (turf.area(turf.polygon([[...s2Coords, s2Coords[0]]])) / 10000).toFixed(2); } catch(e) {}
+        document.getElementById('compareStage2Meta').innerHTML = `
+            <div><b>Reviewer:</b> ${poly.stage2_dfo || 'DFO'}</div>
+            <div><b>Approved:</b> ${poly.stage2_at ? new Date(poly.stage2_at).toLocaleString() : 'Done'}</div>
+            <div><b>Cairns:</b> ${s2Coords.length} points | <b>Area:</b> <span style="color:#34d399">${s2Area} Ha</span></div>
+        `;
+        document.getElementById('compareStage2Coords').innerHTML = s2Coords.map((c, i) => `#${i+1}: [${Number(c[1]).toFixed(7)}, ${Number(c[0]).toFixed(7)}]`).join('<br>');
+    } else {
+        document.getElementById('compareStage2Meta').innerHTML = '<div style="color: #fbbf24;">Awaiting DFO review and final verification.</div>';
+        document.getElementById('compareStage2Coords').innerHTML = '<span style="color:#64748b;">No final DFO verification yet.</span>';
+    }
+
+    // Final KML Download Button & Status
+    const isFullyFinalized = isS1Done && isS2Done;
+    const finalStatusEl = document.getElementById('compareFinalKmlStatus');
+    const finalBtn = document.getElementById('btnCompareDownloadFinalKml');
+    if (isFullyFinalized) {
+        if (finalStatusEl) finalStatusEl.innerHTML = '<span style="color: #34d399;"><i class="fa-solid fa-check-double"></i> Stage 1 &amp; Stage 2 Completed: Final KML Unlocked</span>';
+        if (finalBtn) {
+            finalBtn.disabled = false;
+            finalBtn.className = 'btn-success btn-lg';
+            finalBtn.style.opacity = '1';
+            finalBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download Finalized KML';
+        }
+    } else {
+        if (finalStatusEl) finalStatusEl.innerHTML = '<span style="color: #fbbf24;"><i class="fa-solid fa-lock"></i> Locked: Final KML requires both Stage 1 and Stage 2 completion</span>';
+        if (finalBtn) {
+            finalBtn.disabled = true;
+            finalBtn.className = 'btn-secondary btn-lg';
+            finalBtn.style.opacity = '0.5';
+            finalBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Final KML Locked';
+        }
+    }
+
+    renderCompareMapLayers(poly);
+};
+
+window.closeAdminCompareModal = function() {
+    const modal = document.getElementById('adminCompareModal');
+    if (modal) modal.style.display = 'none';
+    clearAuditMapLayers();
+};
+
+function clearAuditMapLayers() {
+    if (auditBaselineLayer && map) map.removeLayer(auditBaselineLayer);
+    if (auditStage1Layer && map) map.removeLayer(auditStage1Layer);
+    if (auditStage2Layer && map) map.removeLayer(auditStage2Layer);
+    auditBaselineLayer = null;
+    auditStage1Layer = null;
+    auditStage2Layer = null;
+}
+
+function renderCompareMapLayers(poly) {
+    clearAuditMapLayers();
+    if (!map) return;
+
+    const baseCoords = poly.originalCoordinates || poly.coordinates || [];
+    const s1Coords = poly.stage1Coordinates;
+    const s2Coords = poly.stage2Coordinates || (poly.stage2_status === 'COMPLETED' ? poly.coordinates : null);
+
+    const bounds = L.latLngBounds([]);
+
+    if (baseCoords.length >= 3) {
+        const latlngs = baseCoords.map(c => [c[1], c[0]]);
+        auditBaselineLayer = L.polygon(latlngs, {
+            color: '#fbbf24',
+            weight: 3,
+            dashArray: '6, 6',
+            fillColor: '#fbbf24',
+            fillOpacity: 0.12
+        }).addTo(map);
+        latlngs.forEach(ll => bounds.extend(ll));
+    }
+
+    if (s1Coords && s1Coords.length >= 3) {
+        const latlngs = s1Coords.map(c => [c[1], c[0]]);
+        auditStage1Layer = L.polygon(latlngs, {
+            color: '#38bdf8',
+            weight: 3,
+            fillColor: '#38bdf8',
+            fillOpacity: 0.18
+        }).addTo(map);
+        latlngs.forEach(ll => bounds.extend(ll));
+    }
+
+    if (s2Coords && s2Coords.length >= 3) {
+        const latlngs = s2Coords.map(c => [c[1], c[0]]);
+        auditStage2Layer = L.polygon(latlngs, {
+            color: '#10b981',
+            weight: 3.5,
+            fillColor: '#10b981',
+            fillOpacity: 0.25
+        }).addTo(map);
+        latlngs.forEach(ll => bounds.extend(ll));
+    }
+
+    if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+    }
+}
+
+window.toggleCompareMapLayers = function() {
+    const showBase = document.getElementById('toggleCompareBaseline').checked;
+    const showS1 = document.getElementById('toggleCompareStage1').checked;
+    const showS2 = document.getElementById('toggleCompareStage2').checked;
+
+    if (auditBaselineLayer && map) {
+        if (showBase) map.addLayer(auditBaselineLayer);
+        else map.removeLayer(auditBaselineLayer);
+    }
+    if (auditStage1Layer && map) {
+        if (showS1) map.addLayer(auditStage1Layer);
+        else map.removeLayer(auditStage1Layer);
+    }
+    if (auditStage2Layer && map) {
+        if (showS2) map.addLayer(auditStage2Layer);
+        else map.removeLayer(auditStage2Layer);
+    }
+};
+
+window.downloadFinalizedKmlFromCompare = function() {
+    if (currentAuditPolygon) {
+        downloadFinalizedKml(currentAuditPolygon.id);
+    }
+};
+
+window.downloadFinalizedKml = async function(polyId) {
+    const poly = await window.surveyDB.get('polygons', polyId);
+    if (!poly) return;
+
+    if (poly.stage1_status !== 'COMPLETED' || poly.stage2_status !== 'COMPLETED') {
+        alert('Access Restricted: Finalized KML can only be downloaded after both Stage 1 (Field Survey) and Stage 2 (DFO Approval) are completed.');
+        return;
+    }
+
+    const coords = poly.coordinates;
+    const closed = [...coords, coords[0]];
+    const kmlCoords = closed.map(c => `${c[0]},${c[1]},0`).join(' ');
+
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${poly.name} - Finalized RF Boundary</name>
+    <description>Tamil Nadu Forest Department Cadastral Boundary (Stage 1 Field Verified &amp; Stage 2 DFO Approved)</description>
+    <Style id="finalBoundaryStyle">
+      <LineStyle>
+        <color>ff00ff00</color>
+        <width>3</width>
+      </LineStyle>
+      <PolyStyle>
+        <color>4d00ff00</color>
+      </PolyStyle>
+    </Style>
+    <Placemark>
+      <name>${poly.name}</name>
+      <description>Division: ${poly.division} | Range: ${poly.range || ''} | Finalized by ${poly.stage2_dfo || 'DFO'}</description>
+      <styleUrl>#finalBoundaryStyle</styleUrl>
+      <Polygon>
+        <extrude>1</extrude>
+        <altitudeMode>clampToGround</altitudeMode>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>${kmlCoords}</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>`;
+
+    const blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${poly.division}_${poly.range || ''}_${poly.name}_FINALIZED.kml`.replace(/[\s/]+/g, '_');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToastNotification(`✓ Exported finalized KML for "${poly.name}"!`);
+};
+
+// =========================================================================
+// CUSTOMIZABLE EXCEL & PDF EXPORT REPORT GENERATOR
+// =========================================================================
+
+function getFilteredExportData() {
+    const stageFilter = (document.getElementById('exportStageFilter') || {}).value || 'ALL';
+    const divFilter = (document.getElementById('exportDivisionFilter') || {}).value || 'ALL';
+
+    let list = adminAllPolygonsCache.slice();
+
+    if (divFilter !== 'ALL') {
+        list = list.filter(p => (p.division || '').toLowerCase() === divFilter.toLowerCase());
+    }
+
+    if (stageFilter === 'PENDING') {
+        list = list.filter(p => p.stage1_status !== 'COMPLETED' || p.stage2_status !== 'COMPLETED');
+    } else if (stageFilter === 'STAGE_1_DONE') {
+        list = list.filter(p => p.stage1_status === 'COMPLETED');
+    } else if (stageFilter === 'STAGE_1_DONE_STAGE_2_PENDING') {
+        list = list.filter(p => p.stage1_status === 'COMPLETED' && p.stage2_status !== 'COMPLETED');
+    } else if (stageFilter === 'STAGE_2_DONE') {
+        list = list.filter(p => p.stage2_status === 'COMPLETED');
+    }
+
+    return list;
+}
+
+window.handleAdminExportExcel = async function() {
+    const list = getFilteredExportData();
+    if (list.length === 0) {
+        alert('No boundary records match the selected export filter.');
+        return;
+    }
+
+    const columns = [
+        { id: 'colDivision', name: 'Division', get: p => p.division || '' },
+        { id: 'colRange', name: 'Range', get: p => p.range || '' },
+        { id: 'colName', name: 'RF / RL Name', get: p => p.name || '' },
+        { id: 'colArea', name: 'Area (Hectares)', get: p => {
+            try {
+                if (p.coordinates && p.coordinates.length >= 3) {
+                    return (turf.area(turf.polygon([[...p.coordinates, p.coordinates[0]]])) / 10000).toFixed(2);
+                }
+            } catch(e) {}
+            return '0.00';
+        }},
+        { id: 'colCairns', name: 'Cairns Count', get: p => (p.coordinates ? p.coordinates.length : 0) },
+        { id: 'colBaselineDate', name: 'Baseline Upload Date', get: p => p.uploaded_at || p.created_at || '' },
+        { id: 'colStage1Status', name: 'Stage 1 Status', get: p => p.stage1_status || 'PENDING' },
+        { id: 'colStage1Officer', name: 'Field Officer', get: p => p.stage1_officer || '' },
+        { id: 'colStage1Date', name: 'Stage 1 Date', get: p => p.stage1_at || '' },
+        { id: 'colStage2Status', name: 'Stage 2 Status', get: p => p.stage2_status || 'PENDING' },
+        { id: 'colStage2Date', name: 'DFO Approval Date', get: p => p.stage2_at || '' },
+        { id: 'colDisputeCount', name: 'Disputed Points', get: p => (p.flaggedVertices ? p.flaggedVertices.length : 0) }
+    ];
+
+    const activeCols = columns.filter(c => {
+        const el = document.getElementById(c.id);
+        return el ? el.checked : true;
+    });
+
+    if (activeCols.length === 0) {
+        alert('Please select at least one column to include in the Excel export.');
+        return;
+    }
+
+    let csv = '\uFEFF';
+    csv += activeCols.map(c => `"${c.name}"`).join(',') + '\r\n';
+
+    list.forEach(p => {
+        const row = activeCols.map(c => {
+            const val = String(c.get(p) || '').replace(/"/g, '""');
+            return `"${val}"`;
+        });
+        csv += row.join(',') + '\r\n';
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `TN_Forest_Boundaries_Audit_Report_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToastNotification(`✓ Exported Excel report (${list.length} boundaries)!`);
+};
+
+window.handleAdminExportPdf = async function() {
+    const list = getFilteredExportData();
+    if (list.length === 0) {
+        alert('No boundary records match the selected export filter.');
+        return;
+    }
+
+    const columns = [
+        { id: 'colDivision', name: 'Division', get: p => p.division || '' },
+        { id: 'colRange', name: 'Range', get: p => p.range || '' },
+        { id: 'colName', name: 'RF Name', get: p => p.name || '' },
+        { id: 'colArea', name: 'Area (Ha)', get: p => {
+            try {
+                if (p.coordinates && p.coordinates.length >= 3) {
+                    return (turf.area(turf.polygon([[...p.coordinates, p.coordinates[0]]])) / 10000).toFixed(2);
+                }
+            } catch(e) {}
+            return '0.00';
+        }},
+        { id: 'colCairns', name: 'Cairns', get: p => (p.coordinates ? p.coordinates.length : 0) },
+        { id: 'colBaselineDate', name: 'Uploaded', get: p => (p.uploaded_at || p.created_at ? new Date(p.uploaded_at || p.created_at).toLocaleDateString() : '') },
+        { id: 'colStage1Status', name: 'Stage 1', get: p => p.stage1_status === 'COMPLETED' ? 'DONE' : 'PENDING' },
+        { id: 'colStage1Officer', name: 'Field Officer', get: p => p.stage1_officer || '' },
+        { id: 'colStage1Date', name: 'Field Date', get: p => (p.stage1_at ? new Date(p.stage1_at).toLocaleDateString() : '') },
+        { id: 'colStage2Status', name: 'Stage 2', get: p => p.stage2_status === 'COMPLETED' ? 'FINAL' : 'PENDING' },
+        { id: 'colStage2Date', name: 'DFO Date', get: p => (p.stage2_at ? new Date(p.stage2_at).toLocaleDateString() : '') },
+        { id: 'colDisputeCount', name: 'Disputes', get: p => (p.flaggedVertices ? p.flaggedVertices.length : 0) }
+    ];
+
+    const activeCols = columns.filter(c => {
+        const el = document.getElementById(c.id);
+        return el ? el.checked : true;
+    });
+
+    const printWin = window.open('', '_blank');
+    if (!printWin) {
+        alert('Please allow popups to open the PDF report window.');
+        return;
+    }
+
+    const stageFilterVal = document.getElementById('exportStageFilter').value;
+    const divFilterVal = document.getElementById('exportDivisionFilter').value;
+
+    let tableHeaders = activeCols.map(c => `<th>${c.name}</th>`).join('');
+    let tableRows = list.map((p, idx) => {
+        const cells = activeCols.map(c => {
+            const v = c.get(p);
+            let style = '';
+            if (v === 'DONE' || v === 'FINAL') style = 'color: #059669; font-weight: bold;';
+            if (v === 'PENDING') style = 'color: #d97706; font-weight: bold;';
+            return `<td style="${style}">${v}</td>`;
+        }).join('');
+        return `<tr><td style="text-align: center; color: #64748b;">${idx + 1}</td>${cells}</tr>`;
+    }).join('');
+
+    printWin.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>TN Forest Department - RF/RL Survey Audit Report</title>
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; color: #0f172a; }
+                .report-header { text-align: center; border-bottom: 2px solid #047857; padding-bottom: 12px; margin-bottom: 16px; }
+                .report-title { font-size: 18px; font-weight: 800; color: #047857; text-transform: uppercase; margin: 4px 0; }
+                .report-sub { font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 4px; }
+                .report-meta { font-size: 11px; color: #64748b; }
+                .filter-badge-bar { background: #f1f5f9; padding: 8px 12px; border-radius: 6px; font-size: 11.5px; margin-bottom: 14px; display: flex; justify-content: space-between; }
+                table { width: 100%; border-collapse: collapse; font-size: 10.5px; margin-top: 10px; }
+                th { background: #064e3b; color: #ffffff; padding: 7px 6px; text-align: left; font-size: 10.5px; border: 1px solid #047857; }
+                td { padding: 6px; border: 1px solid #cbd5e1; }
+                tr:nth-child(even) { background: #f8fafc; }
+                @media print {
+                    body { margin: 10mm; }
+                    .no-print { display: none; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="no-print" style="margin-bottom: 14px; display: flex; gap: 10px;">
+                <button onclick="window.print()" style="background: #047857; color: #fff; border: none; padding: 8px 18px; border-radius: 4px; font-weight: bold; cursor: pointer;">
+                    Print / Save as PDF
+                </button>
+                <button onclick="window.close()" style="background: #64748b; color: #fff; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer;">
+                    Close
+                </button>
+            </div>
+            <div class="report-header">
+                <div style="font-size: 14px; font-weight: 700; color: #064e3b;">GOVERNMENT OF TAMIL NADU &bull; FOREST DEPARTMENT</div>
+                <div class="report-title">RF / RL Cadastral Survey Two-Stage Verification Report</div>
+                <div class="report-sub">Master State Admin Command Center &bull; All 51 Divisions</div>
+                <div class="report-meta">Generated on: ${new Date().toLocaleString()} | Total Boundaries in Report: <b>${list.length}</b></div>
+            </div>
+            <div class="filter-badge-bar">
+                <span><b>Division Scope:</b> ${divFilterVal}</span>
+                <span><b>Stage Filter:</b> ${stageFilterVal}</span>
+            </div>
+            <table>
+                <thead>
+                    <tr><th style="text-align: center; width: 30px;">#</th>${tableHeaders}</tr>
+                </thead>
+                <tbody>
+                    ${tableRows}
+                </tbody>
+            </table>
+        </body>
+        </html>
+    `);
+    printWin.document.close();
 };
