@@ -32,7 +32,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=23').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=24').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -104,11 +104,7 @@
             <div class="admin-dash-header">
                 <div class="admin-dash-title-group">
                     <div class="admin-dash-title">
-                        <i class="fa-solid fa-crown text-amber"></i> Master State Admin Command Center
-                        <span class="badge-role-admin">STATE HQ</span>
-                    </div>
-                    <div class="admin-dash-subtitle">
-                        Statewide Administrative Monitoring &bull; All 51 Forest Divisions &bull; Two-Stage Cadastral Verification
+                        <i class="fa-solid fa-crown text-amber"></i> Admin Dashboard
                     </div>
                 </div>
 
@@ -117,20 +113,23 @@
                     <button type="button" class="btn-admin-map-toggle" onclick="toggleAdminMapView()" title="Switch to Full Satellite Map View">
                         <i class="fa-solid fa-map-location-dot"></i> <span>View Satellite Map</span>
                     </button>
-                    <!-- Purge / Reset Test Boundaries Button -->
-                    <button type="button" class="btn-admin-purge" onclick="purgeAllExistingKmls()" title="Remove All Test KMLs from Database">
-                        <i class="fa-solid fa-trash-can"></i> <span>Remove All KMLs</span>
-                    </button>
                 </div>
             </div>
 
-            <!-- Wide KPI Metric Cards Grid -->
+            <!-- Wide KPI Metric Cards Grid (Segregated RFs & RLs) -->
             <div class="admin-kpi-wide-grid">
                 <div class="admin-kpi-wide-card">
-                    <div class="kpi-wide-icon" style="color: #38bdf8;"><i class="fa-solid fa-draw-polygon"></i></div>
+                    <div class="kpi-wide-icon" style="color: #38bdf8;"><i class="fa-solid fa-tree"></i></div>
                     <div class="kpi-wide-content">
-                        <div class="kpi-num" id="kpiTotalRfs">0</div>
+                        <div class="kpi-num text-cyan" id="kpiTotalRfs">0</div>
                         <div class="kpi-label">Total Uploaded RFs</div>
+                    </div>
+                </div>
+                <div class="admin-kpi-wide-card">
+                    <div class="kpi-wide-icon" style="color: #c084fc;"><i class="fa-solid fa-tree-city"></i></div>
+                    <div class="kpi-wide-content">
+                        <div class="kpi-num text-purple" id="kpiTotalRls">0</div>
+                        <div class="kpi-label">Total Uploaded RLs</div>
                     </div>
                 </div>
                 <div class="admin-kpi-wide-card">
@@ -192,6 +191,14 @@
                         <label>Filter Range:</label>
                         <select id="adminFilterRange" class="form-control" onchange="filterAdminBoundaries()">
                             <option value="ALL">All Ranges</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label>Boundary Type:</label>
+                        <select id="adminFilterType" class="form-control" onchange="filterAdminBoundaries()">
+                            <option value="ALL">All Types (RF &amp; RL)</option>
+                            <option value="RF">Reserved Forests (RF)</option>
+                            <option value="RL">Reserved Lands (RL)</option>
                         </select>
                     </div>
                     <div class="filter-field">
@@ -356,6 +363,7 @@
                         <div class="column-checkboxes-wide">
                             <label class="col-check-item"><input type="checkbox" id="colDivision" checked> Division Name</label>
                             <label class="col-check-item"><input type="checkbox" id="colRange" checked> Range Name</label>
+                            <label class="col-check-item"><input type="checkbox" id="colBoundaryType" checked> Boundary Type (RF / RL)</label>
                             <label class="col-check-item"><input type="checkbox" id="colName" checked> RF / RL Name</label>
                             <label class="col-check-item"><input type="checkbox" id="colArea" checked> Total Area (Ha)</label>
                             <label class="col-check-item"><input type="checkbox" id="colCairns" checked> Cairns Count</label>

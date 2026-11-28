@@ -3161,17 +3161,61 @@ window.handleAdminKmlFileUpload = async function(e) {
     switchAdminTab('MONITOR');
 };
 
+function getBoundaryType(name) {
+    if (!name || typeof name !== 'string') return 'RF';
+    const s = name.trim().toLowerCase();
+
+    // Check after separator (_ or - or space)
+    const afterSeparator = s.split(/[_\-\s]+/);
+    if (afterSeparator.length > 1) {
+        for (let i = 1; i < afterSeparator.length; i++) {
+            const part = afterSeparator[i].trim();
+            if (part === 'rl' || part.startsWith('rl')) return 'RL';
+            if (part === 'rf' || part.startsWith('rf')) return 'RF';
+        }
+    }
+
+    // Check substring / word
+    if (/\brl\b/i.test(s) || s.includes('_rl') || s.includes('-rl') || s.endsWith('rl') || s.includes('reserved land')) {
+        return 'RL';
+    }
+    return 'RF';
+}
+window.getBoundaryType = getBoundaryType;
+
 async function loadAdminDashboard() {
+    // Reconcile with latest cloud master database if online
+    if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
+        try {
+            await window.surveyDB.pullFromCloud();
+        } catch(e) {
+            console.warn('Admin load pullFromCloud error:', e);
+        }
+    }
+
     const all = await window.surveyDB.getAll('polygons');
     adminAllPolygonsCache = all || [];
 
-    let total = adminAllPolygonsCache.length;
+    updateAdminKpiCounts();
+    filterAdminBoundaries();
+}
+
+function updateAdminKpiCounts() {
+    let totalRfs = 0;
+    let totalRls = 0;
     let s1Pending = 0;
     let s1Done = 0;
     let s2Pending = 0;
     let s2Done = 0;
 
     adminAllPolygonsCache.forEach(p => {
+        const type = getBoundaryType(p.name);
+        if (type === 'RL') {
+            totalRls++;
+        } else {
+            totalRfs++;
+        }
+
         const s1 = p.stage1_status === 'COMPLETED';
         const s2 = p.stage2_status === 'COMPLETED';
 
@@ -3185,24 +3229,25 @@ async function loadAdminDashboard() {
         if (s2) s2Done++;
     });
 
-    const elTotal = document.getElementById('kpiTotalRfs');
+    const elTotalRfs = document.getElementById('kpiTotalRfs');
+    const elTotalRls = document.getElementById('kpiTotalRls');
     const elS1P = document.getElementById('kpiStage1Pending');
     const elS1D = document.getElementById('kpiStage1Done');
     const elS2P = document.getElementById('kpiStage2Pending');
     const elS2D = document.getElementById('kpiStage2Done');
 
-    if (elTotal) elTotal.textContent = total;
+    if (elTotalRfs) elTotalRfs.textContent = totalRfs;
+    if (elTotalRls) elTotalRls.textContent = totalRls;
     if (elS1P) elS1P.textContent = s1Pending;
     if (elS1D) elS1D.textContent = s1Done;
     if (elS2P) elS2P.textContent = s2Pending;
     if (elS2D) elS2D.textContent = s2Done;
-
-    filterAdminBoundaries();
 }
 
 window.filterAdminBoundaries = function() {
     const divFilter = (document.getElementById('adminFilterDivision') || {}).value || 'ALL';
     const rangeFilter = (document.getElementById('adminFilterRange') || {}).value || 'ALL';
+    const typeFilter = (document.getElementById('adminFilterType') || {}).value || 'ALL';
     const stageFilter = (document.getElementById('adminFilterStage') || {}).value || 'ALL';
     const search = ((document.getElementById('adminSearchInput') || {}).value || '').trim().toLowerCase();
 
@@ -3213,6 +3258,9 @@ window.filterAdminBoundaries = function() {
     }
     if (rangeFilter !== 'ALL') {
         list = list.filter(p => (p.range || '').toLowerCase().includes(rangeFilter.toLowerCase()));
+    }
+    if (typeFilter !== 'ALL') {
+        list = list.filter(p => getBoundaryType(p.name) === typeFilter);
     }
     if (stageFilter === 'STAGE_1_PENDING') {
         list = list.filter(p => p.stage1_status !== 'COMPLETED');
@@ -3259,11 +3307,19 @@ function renderAdminBoundaryCards(list) {
             }
         } catch(e) {}
 
+        const bType = getBoundaryType(p.name);
+        const badgeHtml = bType === 'RL' ? 
+            `<span class="badge-boundary-type rl"><i class="fa-solid fa-tree-city"></i> RL</span>` :
+            `<span class="badge-boundary-type rf"><i class="fa-solid fa-tree"></i> RF</span>`;
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td style="text-align: center; color: #64748b; font-weight: 700;">${idx + 1}</td>
             <td>
-                <b style="color: #38bdf8; font-size: 13px;">${p.name}</b>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    ${badgeHtml}
+                    <b style="color: #38bdf8; font-size: 13px;">${p.name}</b>
+                </div>
             </td>
             <td><b>${p.division}</b></td>
             <td>${p.range ? p.range + ' Range' : '<span style="color:#64748b;">General</span>'}</td>
@@ -3282,7 +3338,7 @@ function renderAdminBoundaryCards(list) {
                 </div>
             </td>
             <td style="text-align: center;">
-                <div style="display: flex; gap: 6px; justify-content: center;">
+                <div style="display: flex; gap: 6px; justify-content: center; flex-wrap: wrap;">
                     <button type="button" class="btn-admin-action inspect" onclick="auditAndInspectBoundaryOnMap('${p.id}')" title="Audit Stage 0 vs 1 vs 2 on Satellite Map">
                         <i class="fa-solid fa-code-compare"></i> Audit &amp; Inspect
                     </button>
@@ -3294,12 +3350,59 @@ function renderAdminBoundaryCards(list) {
                             <i class="fa-solid fa-lock"></i> Locked
                         </button>`
                     }
+                    <button type="button" class="btn-admin-action delete" onclick="deleteAdminBoundary('${p.id}')" title="Delete boundary from database">
+                        <i class="fa-solid fa-trash-can"></i> Delete
+                    </button>
                 </div>
             </td>
         `;
         tbody.appendChild(tr);
     });
 }
+
+window.deleteAdminBoundary = async function(polyId) {
+    if (!polyId) return;
+    const boundary = adminAllPolygonsCache.find(p => p.id === polyId) || (window.surveyDB ? await window.surveyDB.get('polygons', polyId) : null);
+    const boundaryName = boundary ? boundary.name : polyId;
+    const boundaryDiv = boundary ? boundary.division : '';
+
+    if (!confirm(`Are you sure you want to delete boundary:\n\n"${boundaryName}" (${boundaryDiv})?\n\nThis will permanently delete this boundary from both this dashboard and the cloud database.`)) {
+        return;
+    }
+
+    try {
+        // 1. Delete from IndexedDB locally
+        if (window.surveyDB) {
+            await window.surveyDB.delete('polygons', polyId);
+        }
+
+        // 2. Track in local deleted storage
+        const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+        if (!localDelList.includes(polyId)) {
+            localDelList.push(polyId);
+            localStorage.setItem('tn_deleted_polygons', JSON.stringify(localDelList));
+        }
+
+        // 3. Immediately remove from local cache and refresh UI
+        adminAllPolygonsCache = adminAllPolygonsCache.filter(p => p.id !== polyId);
+        updateAdminKpiCounts();
+        filterAdminBoundaries();
+
+        // 4. Sync deletion with cloud immediately
+        if (window.surveyDB && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud({
+                deletedPolygonId: polyId,
+                deletedPolygonName: boundaryName,
+                deletedPolygonDivision: boundaryDiv
+            });
+        }
+
+        showToastNotification(`✓ Deleted "${boundaryName}" successfully.`);
+    } catch (err) {
+        console.error('Error deleting boundary:', err);
+        alert('Error deleting boundary: ' + err.message);
+    }
+};
 
 window.auditAndInspectBoundaryOnMap = async function(polyId) {
     const adminDashView = document.getElementById('adminDashboardView');
@@ -3703,6 +3806,7 @@ window.handleAdminExportExcel = async function() {
     const columns = [
         { id: 'colDivision', name: 'Division', get: p => p.division || '' },
         { id: 'colRange', name: 'Range', get: p => p.range || '' },
+        { id: 'colBoundaryType', name: 'Boundary Type', get: p => getBoundaryType(p.name) },
         { id: 'colName', name: 'RF / RL Name', get: p => p.name || '' },
         { id: 'colArea', name: 'Area (Hectares)', get: p => {
             try {
@@ -3763,6 +3867,7 @@ window.handleAdminExportPdf = async function() {
     const columns = [
         { id: 'colDivision', name: 'Division', get: p => p.division || '' },
         { id: 'colRange', name: 'Range', get: p => p.range || '' },
+        { id: 'colBoundaryType', name: 'Type', get: p => getBoundaryType(p.name) },
         { id: 'colName', name: 'RF Name', get: p => p.name || '' },
         { id: 'colArea', name: 'Area (Ha)', get: p => {
             try {

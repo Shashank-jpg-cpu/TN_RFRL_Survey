@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tn-forest-survey-v23';
+const CACHE_NAME = 'tn-forest-survey-v24';
 const TILE_CACHE = 'tn-forest-tiles-v2';
 
 const ASSETS_TO_CACHE = [

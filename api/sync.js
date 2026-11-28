@@ -234,6 +234,9 @@ module.exports = async function handler(req, res) {
             ];
             incomingDelIds.forEach(id => delPolySet.add(id));
             store.deleted_polygon_ids = Array.from(delPolySet);
+            if (incomingDelIds.length > 0) {
+                store.polygons = (store.polygons || []).filter(p => p && p.id && !delPolySet.has(p.id));
+            }
 
             if (body.deletedPolygonName && body.deletedPolygonDivision) {
                 const targetKey = `${body.deletedPolygonDivision.toLowerCase().trim()}:::${body.deletedPolygonName.toLowerCase().trim()}`;

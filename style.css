@@ -2258,6 +2258,46 @@ html.user-authenticated #mainContainer { display: flex !important; }
     cursor: not-allowed;
 }
 
+.btn-admin-action.delete {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+
+.btn-admin-action.delete:hover {
+    background: #ef4444;
+    border-color: #dc2626;
+    color: #ffffff;
+}
+
+.badge-boundary-type {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.badge-boundary-type.rf {
+    background: rgba(14, 165, 233, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.badge-boundary-type.rl {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.text-purple {
+    color: #c084fc !important;
+}
+
 /* ========================================================================= */
 /* FULL-SCREEN WIDE ADMIN EXECUTIVE DASHBOARD                               */
 /* ========================================================================= */
