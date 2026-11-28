@@ -225,10 +225,27 @@ module.exports = async function handler(req, res) {
                 store.deleted_survey_ids = Array.from(delSet);
             }
 
-            // 2. Merge deleted polygon IDs
-            if (body.deleted_polygon_ids && Array.isArray(body.deleted_polygon_ids)) {
-                const delPolySet = new Set(store.deleted_polygon_ids || []);
-                body.deleted_polygon_ids.forEach(id => delPolySet.add(id));
+            // 2. Merge deleted polygon IDs (by ID and by division+name)
+            const delPolySet = new Set(store.deleted_polygon_ids || []);
+            const incomingDelIds = [
+                ...(Array.isArray(body.deleted_polygon_ids) ? body.deleted_polygon_ids : []),
+                ...(Array.isArray(body.deletedPolygonIds) ? body.deletedPolygonIds : []),
+                ...(body.deletedPolygonId ? [body.deletedPolygonId] : [])
+            ];
+            incomingDelIds.forEach(id => delPolySet.add(id));
+            store.deleted_polygon_ids = Array.from(delPolySet);
+
+            if (body.deletedPolygonName && body.deletedPolygonDivision) {
+                const targetKey = `${body.deletedPolygonDivision.toLowerCase().trim()}:::${body.deletedPolygonName.toLowerCase().trim()}`;
+                store.polygons = (store.polygons || []).filter(p => {
+                    if (!p || !p.id) return false;
+                    const key = `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;
+                    if (key === targetKey) {
+                        delPolySet.add(p.id);
+                        return false;
+                    }
+                    return true;
+                });
                 store.deleted_polygon_ids = Array.from(delPolySet);
             }
 
@@ -255,7 +272,6 @@ module.exports = async function handler(req, res) {
             store.pending_surveys = Array.from(survMap.values());
 
             // 4. Merge polygons: strictly prevent duplicate RFs by division + name (overwrite existing)
-            const delPolySet = new Set(store.deleted_polygon_ids || []);
             const polyByNameMap = new Map();
 
             const makePolyKey = (p) => `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;

@@ -32,7 +32,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=16').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=17').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -753,6 +753,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="tn_offline_basemap.js"></script>
     <script src="tn_divisions_ranges.js"></script>
     <script src="db.js"></script>
     <script src="app.js"></script>

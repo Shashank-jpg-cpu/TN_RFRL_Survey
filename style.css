@@ -2032,3 +2032,14 @@ html.user-authenticated #mainContainer { display: flex !important; }
     background: #059669;
     color: #ffffff;
 }
+
+.division-tooltip {
+    background: rgba(6, 78, 59, 0.9) !important;
+    border: 1px solid #10b981 !important;
+    color: #a7f3d0 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    border-radius: 4px !important;
+    padding: 3px 8px !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5) !important;
+}

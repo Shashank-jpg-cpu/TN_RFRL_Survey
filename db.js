@@ -488,11 +488,11 @@ class SurveyDB {
                 }
             }
 
-            // 1b. Remove deleted polygons locally
-            if (cloudData.deleted_polygon_ids && Array.isArray(cloudData.deleted_polygon_ids)) {
-                for (const delPolyId of cloudData.deleted_polygon_ids) {
-                    await this.delete('polygons', delPolyId);
-                }
+            // 1b. Remove deleted polygons locally (combining cloud + persistent local records)
+            const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+            const allDelPolyIds = new Set([...(cloudData.deleted_polygon_ids || []), ...localDelList]);
+            for (const delPolyId of allDelPolyIds) {
+                await this.delete('polygons', delPolyId);
             }
 
             // 1c. Remove deleted users locally
@@ -512,9 +512,10 @@ class SurveyDB {
                 }
             }
 
-            // 3. Sync Polygons (latest updated_at strictly wins - NEVER overwrite fresh local edits)
+            // 3. Sync Polygons (NEVER resurrect locally or cloud deleted polygons!)
             if (cloudData.polygons && Array.isArray(cloudData.polygons)) {
-                const delPolys = new Set(cloudData.deleted_polygon_ids || []);
+                const localDelList = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+                const delPolys = new Set([...(cloudData.deleted_polygon_ids || []), ...localDelList]);
                 for (const p of cloudData.polygons) {
                     if (p && p.id && !delPolys.has(p.id)) {
                         const local = await this.get('polygons', p.id);

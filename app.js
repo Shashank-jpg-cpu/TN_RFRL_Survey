@@ -154,6 +154,30 @@ function initMap() {
     vertexMarkersGroup = L.layerGroup().addTo(map);
     newSurveyMarkersGroup = L.layerGroup().addTo(map);
 
+    // 100% OFFLINE TAMIL NADU BASEMAP (State & Division Boundaries)
+    // Guarantees the map is NEVER a black screen, even with NO internet and NO RF loaded!
+    if (window.TN_OFFLINE_BASEMAP) {
+        window.tnOfflineLayer = L.geoJSON(window.TN_OFFLINE_BASEMAP, {
+            style: {
+                color: '#10b981',
+                weight: 1.2,
+                opacity: 0.55,
+                fillColor: '#064e3b',
+                fillOpacity: 0.12,
+                dashArray: '3, 3'
+            },
+            onEachFeature: function(feature, layer) {
+                if (feature.properties && feature.properties.name) {
+                    layer.bindTooltip(feature.properties.name, {
+                        permanent: false,
+                        direction: 'center',
+                        className: 'division-tooltip'
+                    });
+                }
+            }
+        }).addTo(map);
+    }
+
     // Map Click Handler for Field Officer Manual Pin-Drop
     map.on('click', (e) => {
         if (isMapClickActive && currentRole === 'FIELD_OFFICER') {
@@ -1091,12 +1115,47 @@ async function renameCurrentBoundary() {
 // Delete Boundary from DB
 async function deleteCurrentBoundary() {
     if (!currentBoundaryData) return;
-    if (confirm(`Are you sure you want to delete "${currentBoundaryData.name}" from ${currentDivision} database?`)) {
-        await window.surveyDB.delete('polygons', currentBoundaryData.id);
-        if (navigator.onLine && window.surveyDB.syncCloud) {
-            await window.surveyDB.syncCloud({ deletedPolygonId: currentBoundaryData.id }).catch(() => {});
+    const polyId = currentBoundaryData.id;
+    const polyName = currentBoundaryData.name;
+    const polyDiv = currentBoundaryData.division || currentDivision;
+
+    if (confirm(`Are you sure you want to delete "${polyName}" from ${polyDiv} database?`)) {
+        // 1. Delete locally from IndexedDB
+        await window.surveyDB.delete('polygons', polyId);
+
+        // Also clean up any lingering records with same name/division
+        const allLocal = await window.surveyDB.getAll('polygons');
+        const deletedIds = [polyId];
+        for (const p of allLocal) {
+            if ((p.division || '').toLowerCase() === polyDiv.toLowerCase() &&
+                (p.name || '').trim().toLowerCase() === polyName.trim().toLowerCase()) {
+                deletedIds.push(p.id);
+                await window.surveyDB.delete('polygons', p.id);
+            }
         }
-        alert('Boundary deleted from database.');
+
+        // 2. Persist deleted IDs in localStorage so on reload/refresh they NEVER resurrect!
+        const localDeleted = JSON.parse(localStorage.getItem('tn_deleted_polygons') || '[]');
+        deletedIds.forEach(id => {
+            if (!localDeleted.includes(id)) localDeleted.push(id);
+        });
+        localStorage.setItem('tn_deleted_polygons', JSON.stringify(localDeleted));
+
+        // 3. Clear boundary from map
+        clearActiveBoundaryMap();
+        currentBoundaryData = null;
+
+        // 4. Immediately sync deletion to cloud
+        if (navigator.onLine && window.surveyDB.syncCloud) {
+            await window.surveyDB.syncCloud({ 
+                deletedPolygonId: polyId,
+                deletedPolygonIds: deletedIds,
+                deletedPolygonName: polyName,
+                deletedPolygonDivision: polyDiv
+            }).catch(() => {});
+        }
+
+        alert(`Boundary "${polyName}" permanently deleted from database.`);
         await loadDfoBoundaries();
     }
 }

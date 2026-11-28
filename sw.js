@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tn-forest-survey-v16';
+const CACHE_NAME = 'tn-forest-survey-v17';
 const TILE_CACHE = 'tn-forest-tiles-v1';
 
 const ASSETS_TO_CACHE = [
@@ -7,6 +7,7 @@ const ASSETS_TO_CACHE = [
   './style.css',
   './db.js',
   './app.js',
+  './tn_offline_basemap.js',
   './tn_divisions_ranges.js',
   './manifest.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
