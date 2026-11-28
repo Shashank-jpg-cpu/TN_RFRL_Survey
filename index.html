@@ -17,11 +17,22 @@
     <!-- Turf.js -->
     <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
 
+    <script>
+        // Synchronous active session check (guarantees zero login screen flicker on refresh)
+        (function() {
+            try {
+                var s = localStorage.getItem('tn_forest_survey_session_v4');
+                if (s && JSON.parse(s)) {
+                    document.documentElement.classList.add('user-authenticated');
+                }
+            } catch(e) {}
+        })();
+    </script>
     <link rel="stylesheet" href="style.css">
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=7').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=14').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -693,20 +704,17 @@
                     </select>
                 </div>
 
-                <!-- Username Input (Role-specific placeholders) -->
+                <!-- Username Input (Role-specific placeholders, NO hardcoded credential hints) -->
                 <div class="form-group">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <label id="loginUserLabel">DFO Username</label>
-                        <span id="dfoUserHint" class="login-field-hint">e.g. dfo_chennai</span>
-                    </div>
-                    <input type="text" id="loginUsername" class="form-control" placeholder="Enter officer username" required autocomplete="username">
+                    <label id="loginUserLabel">DFO Username</label>
+                    <input type="text" id="loginUsername" class="form-control" placeholder="Enter DFO Username" required autocomplete="username">
                 </div>
 
                 <!-- Password with Eye Toggle Icon -->
                 <div class="form-group">
                     <label>Officer Password</label>
                     <div class="password-input-wrapper">
-                        <input type="password" id="loginPassword" class="form-control" placeholder="Enter password" required autocomplete="current-password">
+                        <input type="password" id="loginPassword" class="form-control" placeholder="Enter Password" required autocomplete="current-password">
                         <button type="button" class="btn-pwd-eye" onclick="togglePasswordVisibility('loginPassword', 'pwdEyeIcon')">
                             <i id="pwdEyeIcon" class="fa-regular fa-eye"></i>
                         </button>
@@ -721,6 +729,10 @@
                         <span>Install Mobile App: <b>TN RFRL Survey</b></span>
                     </button>
                 </div>
+
+                <a href="TN_Forest_All_51_Divisions_DFO_Credentials.pdf" download class="btn-download-pdf-creds" title="Download Official 51 Divisions DFO Master Credentials (PDF)">
+                    <i class="fa-solid fa-file-pdf"></i> Download 51 Divisions DFO Credentials (PDF)
+                </a>
 
                 <button type="button" class="btn-sync-cloud-login" onclick="handleGlobalForceRefresh()" style="width: 100%; margin-bottom: 12px; background: rgba(2, 132, 199, 0.15); border: 1px solid #0284c7; color: #38bdf8; padding: 9px 12px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer;">
                     <i class="fa-solid fa-arrows-rotate"></i> Sync Latest Cloud Database (All 51 Divisions)

@@ -137,13 +137,31 @@ function initMap() {
         maxZoom: 19
     });
 
+    // 6. Cadastral Survey Grid (100% Offline Vector Grid Base)
+    const offlineCadastral = L.tileLayer(
+        'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">' +
+            '<rect width="256" height="256" fill="#0d1f16" stroke="#163826" stroke-width="1"/>' +
+            '<line x1="0" y1="64" x2="256" y2="64" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
+            '<line x1="0" y1="128" x2="256" y2="128" stroke="#1f4d35" stroke-width="0.8"/>' +
+            '<line x1="0" y1="192" x2="256" y2="192" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
+            '<line x1="64" y1="0" x2="64" y2="256" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
+            '<line x1="128" y1="0" x2="128" y2="256" stroke="#1f4d35" stroke-width="0.8"/>' +
+            '<line x1="192" y1="0" x2="192" y2="256" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
+            '<circle cx="128" cy="128" r="2.5" fill="#22c55e" opacity="0.4"/>' +
+            '<text x="128" y="132" fill="#22c55e" font-size="8.5" font-family="-apple-system, sans-serif" text-anchor="middle" font-weight="bold" opacity="0.5">OFFLINE CADASTRE GRID</text>' +
+            '</svg>'
+        ), { maxZoom: 22 }
+    );
+
     // Add layer switcher control
     L.control.layers({
         'Google Satellite Hybrid': googleHybrid,
         'Google Satellite (Clean)': googleSat,
         'Esri World Satellite': esriSat,
         'Topographic / Terrain Contours': googleTerrain,
-        'Street Map (Voyager)': cartoLight
+        'Street Map (Voyager)': cartoLight,
+        'Offline Cadastre Grid': offlineCadastral
     }, null, { position: 'topright' }).addTo(map);
 
     vertexMarkersGroup = L.layerGroup().addTo(map);
@@ -209,35 +227,31 @@ function updateLoginRanges() {
 }
 
 function updateLoginFieldHints() {
-    const div = document.getElementById('loginDivision').value;
-    const creds = window.getDfoCreds ? window.getDfoCreds(div) : null;
     const hintEl = document.getElementById('dfoUserHint');
     const userLabel = document.getElementById('loginUserLabel');
     const userInp = document.getElementById('loginUsername');
     const passInp = document.getElementById('loginPassword');
 
+    if (hintEl) {
+        hintEl.style.display = 'none';
+        hintEl.textContent = '';
+    }
+
     if (selectedLoginRole === 'DFO') {
         if (userLabel) userLabel.textContent = 'DFO Username';
-        if (hintEl) {
-            hintEl.style.display = 'inline-block';
-            hintEl.textContent = creds ? `e.g. ${creds.username}` : `e.g. dfo_${div.toLowerCase()}`;
-        }
         if (userInp) {
-            userInp.placeholder = creds ? creds.username : 'Enter DFO username';
+            userInp.placeholder = 'Enter DFO Username';
         }
         if (passInp) {
-            passInp.placeholder = creds ? creds.password : 'Enter DFO password';
+            passInp.placeholder = 'Enter DFO Password';
         }
     } else {
         if (userLabel) userLabel.textContent = 'Field Officer Username';
-        if (hintEl) {
-            hintEl.style.display = 'none';
-        }
         if (userInp) {
-            userInp.placeholder = 'e.g. fo_username';
+            userInp.placeholder = 'Enter Field Officer Username';
         }
         if (passInp) {
-            passInp.placeholder = 'Enter field officer password';
+            passInp.placeholder = 'Enter Field Officer Password';
         }
     }
 }
@@ -341,6 +355,7 @@ async function checkAuthSession() {
     const mainContainer = document.getElementById('mainContainer');
 
     if (!user) {
+        document.documentElement.classList.remove('user-authenticated');
         if (loginScreen) loginScreen.style.display = 'flex';
         if (appHeader) appHeader.style.display = 'none';
         if (mainContainer) mainContainer.style.display = 'none';
@@ -348,16 +363,25 @@ async function checkAuthSession() {
         return;
     }
 
+    // USER IS LOGGED IN: DISPLAY PORTAL SYNCHRONOUSLY & INSTANTLY (ZERO FLICKER ON REFRESH)
+    document.documentElement.classList.add('user-authenticated');
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (appHeader) appHeader.style.display = 'flex';
+    if (mainContainer) mainContainer.style.display = 'flex';
+
     const sessionKey = user.sessionKey || (user.role === 'DFO' ? `DFO_${user.division.toUpperCase().replace(/[^A-Z0-9]/g, '_')}` : `FO_${user.username.toUpperCase()}`);
     user.sessionKey = sessionKey;
 
-    // Check cloud if another device is currently active
+    // Start background continuous heartbeat
+    if (window.surveyDB.startHeartbeat) window.surveyDB.startHeartbeat(sessionKey);
+
+    // Verify session asynchronously in background without delaying or flashing UI
     if (navigator.onLine && window.surveyDB.sendHeartbeat) {
-        try {
-            const hb = await window.surveyDB.sendHeartbeat(sessionKey);
+        window.surveyDB.sendHeartbeat(sessionKey).then(async (hb) => {
             if (hb && hb.code === 'SESSION_TERMINATED') {
                 alert(`Access Restricted: This ${user.role} portal is currently active on ${hb.deviceType || 'another device'}. You have been logged out on this device.`);
                 await window.surveyDB.logout();
+                document.documentElement.classList.remove('user-authenticated');
                 if (loginScreen) loginScreen.style.display = 'flex';
                 if (appHeader) appHeader.style.display = 'none';
                 if (mainContainer) mainContainer.style.display = 'none';
@@ -374,17 +398,9 @@ async function checkAuthSession() {
                     `;
                     errBox.style.display = 'block';
                 }
-                return;
             }
-        } catch (e) {}
+        }).catch(() => {});
     }
-
-    // Session is valid for this device: start continuous heartbeat
-    if (window.surveyDB.startHeartbeat) window.surveyDB.startHeartbeat(sessionKey);
-
-    if (loginScreen) loginScreen.style.display = 'none';
-    if (appHeader) appHeader.style.display = 'flex';
-    if (mainContainer) mainContainer.style.display = 'flex';
 
     if (map) {
         setTimeout(() => map.invalidateSize(), 150);
@@ -2359,14 +2375,52 @@ function closeRtkModal() {
 }
 
 function setupNetworkListeners() {
-    window.addEventListener('online', () => {
-        document.getElementById('connectionPill').className = 'status-pill online';
-        document.getElementById('connectionText').textContent = 'ONLINE';
+    window.addEventListener('online', async () => {
+        const pill = document.getElementById('connectionPill');
+        const text = document.getElementById('connectionText');
+        if (pill) pill.className = 'status-pill online';
+        if (text) text.textContent = 'ONLINE';
+
+        showToastNotification('🌐 Back Online! Auto-syncing pending surveys to Cloud...');
+        try {
+            if (window.surveyDB && window.surveyDB.syncCloud) {
+                await window.surveyDB.syncCloud();
+                showToastNotification('✅ Cloud Synchronized Successfully!');
+                if (currentRole === 'DFO') {
+                    await loadPendingFieldSurveys(true);
+                } else if (currentRole === 'FIELD_OFFICER') {
+                    if (window.loadFieldAssignedBoundaries) await window.loadFieldAssignedBoundaries(true);
+                }
+            }
+        } catch(e) {
+            console.warn('Auto-sync error on reconnect:', e);
+        }
     });
+
     window.addEventListener('offline', () => {
-        document.getElementById('connectionPill').className = 'status-pill offline';
-        document.getElementById('connectionText').textContent = 'OFFLINE';
+        const pill = document.getElementById('connectionPill');
+        const text = document.getElementById('connectionText');
+        if (pill) pill.className = 'status-pill offline';
+        if (text) text.textContent = 'OFFLINE';
+        showToastNotification('⚠️ Offline Mode: Surveys will be saved locally & auto-sync when online.');
     });
+
+    // Background Periodic Sync (Every 25 seconds)
+    // Ensures offline surveys auto-push without waiting for user action, and DFO pulls latest submissions
+    setInterval(async () => {
+        if (navigator.onLine && window.surveyDB && window.surveyDB.syncCloud) {
+            try {
+                const pending = await window.surveyDB.getAll('pending_surveys');
+                if (pending && pending.length > 0) {
+                    await window.surveyDB.syncCloud();
+                }
+                if (currentRole === 'DFO') {
+                    await window.surveyDB.pullFromCloud();
+                    await loadPendingFieldSurveys(false);
+                }
+            } catch(e) {}
+        }
+    }, 25000);
 }
 
 
