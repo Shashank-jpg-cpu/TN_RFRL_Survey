@@ -254,29 +254,48 @@ module.exports = async function handler(req, res) {
             }
             store.pending_surveys = Array.from(survMap.values());
 
-            // 4. Merge polygons for ALL divisions (filtering out deleted ones, prioritizing latest updated_at)
+            // 4. Merge polygons: strictly prevent duplicate RFs by division + name (overwrite existing)
             const delPolySet = new Set(store.deleted_polygon_ids || []);
-            const polyMap = new Map();
+            const polyByNameMap = new Map();
+
+            const makePolyKey = (p) => `${(p.division || '').toLowerCase().trim()}:::${(p.name || '').toLowerCase().trim()}`;
+
             (store.polygons || []).forEach(p => {
-                if (p && p.id && !delPolySet.has(p.id)) polyMap.set(p.id, p);
+                if (p && p.id && !delPolySet.has(p.id)) {
+                    const key = makePolyKey(p);
+                    const existing = polyByNameMap.get(key);
+                    if (!existing) {
+                        polyByNameMap.set(key, p);
+                    } else {
+                        const existTime = existing.updated_at ? new Date(existing.updated_at).getTime() : (existing.created_at ? new Date(existing.created_at).getTime() : 0);
+                        const pTime = p.updated_at ? new Date(p.updated_at).getTime() : (p.created_at ? new Date(p.created_at).getTime() : 0);
+                        if (pTime >= existTime) {
+                            p.id = existing.id;
+                            polyByNameMap.set(key, p);
+                        }
+                    }
+                }
             });
+
             if (body.polygons && Array.isArray(body.polygons)) {
                 body.polygons.forEach(p => {
                     if (p && p.id && !delPolySet.has(p.id)) {
-                        const existing = polyMap.get(p.id);
+                        const key = makePolyKey(p);
+                        const existing = polyByNameMap.get(key);
                         if (!existing) {
-                            polyMap.set(p.id, p);
+                            polyByNameMap.set(key, p);
                         } else {
                             const existTime = existing.updated_at ? new Date(existing.updated_at).getTime() : (existing.created_at ? new Date(existing.created_at).getTime() : 0);
                             const inTime = p.updated_at ? new Date(p.updated_at).getTime() : (p.created_at ? new Date(p.created_at).getTime() : 0);
                             if (inTime >= existTime) {
-                                polyMap.set(p.id, p);
+                                p.id = existing.id; // Keep canonical ID, overwrite data
+                                polyByNameMap.set(key, p);
                             }
                         }
                     }
                 });
             }
-            store.polygons = Array.from(polyMap.values());
+            store.polygons = Array.from(polyByNameMap.values());
 
             // 5. Merge users for ALL divisions & ranges uniquely by username
             const delUserSet = new Set(store.deleted_user_ids || []);

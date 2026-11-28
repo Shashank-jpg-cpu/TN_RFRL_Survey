@@ -2010,3 +2010,25 @@ html.user-authenticated #appHeader { display: flex !important; }
 html.user-authenticated #mainContainer { display: flex !important; }
 
 
+
+.btn-download-offline-tiles {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 9px 12px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid #10b981;
+    color: #34d399;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.btn-download-offline-tiles:hover {
+    background: #059669;
+    color: #ffffff;
+}

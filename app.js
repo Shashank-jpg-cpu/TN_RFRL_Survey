@@ -97,6 +97,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     checkAuthSession();
     setupNetworkListeners();
     startSingleGpsTracker(); // Runs once continuously in background
+    if (window.preCacheTamilNaduBaseTiles) window.preCacheTamilNaduBaseTiles();
 });
 
 // -------------------------------------------------------------------------
@@ -114,8 +115,7 @@ function initMap() {
     // 1. Google Satellite Hybrid (World-class Satellite Imagery + Road & Place Names)
     const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 22,
-        maxNativeZoom: 18,
-        subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+        maxNativeZoom: 18
     }).addTo(map);
 
     // 2. Google Satellite Only (Clean Imagery with no labels)
@@ -597,83 +597,159 @@ async function loadDfoActiveBoundary() {
 
 
 // -------------------------------------------------------------------------
-// REAL SATELLITE MAP OFFLINE PRE-CACHE ENGINE
-// Pre-downloads exact satellite tiles covering the selected RF boundary
+// REAL SATELLITE MAP OFFLINE ENGINE
+// Pre-downloads and caches real satellite tiles for boundary & region
 // -------------------------------------------------------------------------
 let lastCachedBoundaryId = null;
 
-window.autoCacheBoundarySatelliteTiles = function(coordinates, boundaryId = '') {
-    if (!navigator.onLine || !coordinates || coordinates.length < 3) return;
-    if (!('caches' in window)) return;
-    if (boundaryId && boundaryId === lastCachedBoundaryId) return;
-    lastCachedBoundaryId = boundaryId;
+window.preCacheTamilNaduBaseTiles = async function() {
+    if (!navigator.onLine || !('caches' in window)) return;
+    try {
+        const tileCache = await caches.open('tn-forest-tiles-v1');
+        const lon2tile = (lon, z) => Math.floor((lon + 180) / 360 * Math.pow(2, z));
+        const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
 
-    setTimeout(async () => {
-        try {
-            let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
-            coordinates.forEach(c => {
-                const lon = c[0];
-                const lat = c[1];
-                if (lat < minLat) minLat = lat;
-                if (lat > maxLat) maxLat = lat;
-                if (lon < minLon) minLon = lon;
-                if (lon > maxLon) maxLon = lon;
-            });
-
-            // 15% safety buffer around forest reserve boundary
-            const latPad = Math.max((maxLat - minLat) * 0.15, 0.005);
-            const lonPad = Math.max((maxLon - minLon) * 0.15, 0.005);
-            minLat -= latPad; maxLat += latPad;
-            minLon -= lonPad; maxLon += lonPad;
-
-            const lon2tile = (lon, z) => Math.floor((lon + 180) / 360 * Math.pow(2, z));
-            const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
-
-            const urls = [];
-            // Cache zoom levels 13 to 17 (covers high-res satellite down to sub-meter details)
-            for (let z = 13; z <= 17; z++) {
-                const xMin = lon2tile(minLon, z);
-                const xMax = lon2tile(maxLon, z);
-                const yMin = lat2tile(maxLat, z);
-                const yMax = lat2tile(minLat, z);
-
-                const tileCount = (xMax - xMin + 1) * (yMax - yMin + 1);
-                if (tileCount > 300) continue; // safety limit
-
-                for (let x = xMin; x <= xMax; x++) {
-                    for (let y = yMin; y <= yMax; y++) {
-                        urls.push(`https://mt1.google.com/vt/lyrs=y&x=${x}&y=${y}&z=${z}`);
-                    }
+        const baseUrls = [];
+        // Tamil Nadu regional bounding box at zooms 7-9
+        for (let z = 7; z <= 9; z++) {
+            const xMin = lon2tile(76.0, z);
+            const xMax = lon2tile(80.5, z);
+            const yMin = lat2tile(13.6, z);
+            const yMax = lat2tile(8.0, z);
+            for (let x = xMin; x <= xMax; x++) {
+                for (let y = yMin; y <= yMax; y++) {
+                    baseUrls.push(`https://mt1.google.com/vt/lyrs=y&x=${x}&y=${y}&z=${z}`);
                 }
             }
-
-            const tileCache = await caches.open('tn-forest-tiles-v1');
-            let cachedCount = 0;
-
-            // Fetch concurrently in small batches
-            for (let i = 0; i < urls.length; i += 6) {
-                const batch = urls.slice(i, i + 6);
-                await Promise.allSettled(batch.map(async url => {
-                    const existing = await tileCache.match(url);
-                    if (!existing) {
-                        try {
-                            const res = await fetch(url, { mode: 'no-cors' });
-                            if (res) {
-                                await tileCache.put(url, res);
-                                cachedCount++;
-                            }
-                        } catch(e) {}
-                    }
-                }));
-            }
-
-            if (cachedCount > 0) {
-                showToastNotification(`🛰️ Satellite Map Cached: ${cachedCount} tiles ready for offline survey!`);
-            }
-        } catch(e) {
-            console.warn('[Offline Map] Pre-cache error:', e.message);
         }
-    }, 500);
+
+        for (let i = 0; i < baseUrls.length; i += 6) {
+            const batch = baseUrls.slice(i, i + 6);
+            await Promise.allSettled(batch.map(async u => {
+                const ex = await tileCache.match(u);
+                if (!ex) {
+                    try {
+                        const r = await fetch(u, { mode: 'no-cors' });
+                        if (r) await tileCache.put(u, r);
+                    } catch(e) {}
+                }
+            }));
+        }
+    } catch(e) {}
+};
+
+window.autoCacheBoundarySatelliteTiles = async function(coordinates, boundaryId = '', isUserExplicit = false) {
+    if (!coordinates || coordinates.length < 3) return;
+    if (!('caches' in window)) return;
+    if (!isUserExplicit && boundaryId && boundaryId === lastCachedBoundaryId) return;
+    lastCachedBoundaryId = boundaryId;
+
+    const btnStatus = document.getElementById('btnOfflineMapStatus');
+    const textStatus = document.getElementById('offlineMapStatusText');
+    const fieldTextStatus = document.getElementById('fieldOfflineTileText');
+    const dfoTextStatus = document.getElementById('dfoOfflineTileText');
+
+    const updateStatusUI = (text, isSuccess = false) => {
+        if (textStatus) textStatus.textContent = text;
+        if (fieldTextStatus) fieldTextStatus.textContent = text;
+        if (dfoTextStatus) dfoTextStatus.textContent = text;
+        if (btnStatus) {
+            btnStatus.style.borderColor = isSuccess ? '#10b981' : '#0284c7';
+            btnStatus.style.color = isSuccess ? '#34d399' : '#38bdf8';
+        }
+    };
+
+    if (!navigator.onLine) {
+        updateStatusUI('🟢 Offline Satellite Map Active');
+        return;
+    }
+
+    updateStatusUI('⏳ Downloading Satellite Map...');
+
+    try {
+        let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+        coordinates.forEach(c => {
+            const lon = c[0];
+            const lat = c[1];
+            if (lat < minLat) minLat = lat;
+            if (lat > maxLat) maxLat = lat;
+            if (lon < minLon) minLon = lon;
+            if (lon > maxLon) maxLon = lon;
+        });
+
+        // 20% safety margin around reserve forest boundary
+        const latPad = Math.max((maxLat - minLat) * 0.20, 0.006);
+        const lonPad = Math.max((maxLon - minLon) * 0.20, 0.006);
+        minLat -= latPad; maxLat += latPad;
+        minLon -= lonPad; maxLon += lonPad;
+
+        const lon2tile = (lon, z) => Math.floor((lon + 180) / 360 * Math.pow(2, z));
+        const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
+
+        const urls = [];
+        // Cache zoom levels 12 to 17 (full cadastral satellite resolution)
+        for (let z = 12; z <= 17; z++) {
+            const xMin = lon2tile(minLon, z);
+            const xMax = lon2tile(maxLon, z);
+            const yMin = lat2tile(maxLat, z);
+            const yMax = lat2tile(minLat, z);
+
+            const count = (xMax - xMin + 1) * (yMax - yMin + 1);
+            if (count > 350) continue; // Skip if area is overly broad at this zoom
+
+            for (let x = xMin; x <= xMax; x++) {
+                for (let y = yMin; y <= yMax; y++) {
+                    urls.push(`https://mt1.google.com/vt/lyrs=y&x=${x}&y=${y}&z=${z}`);
+                }
+            }
+        }
+
+        const tileCache = await caches.open('tn-forest-tiles-v1');
+        let newlyCached = 0;
+
+        for (let i = 0; i < urls.length; i += 8) {
+            const batch = urls.slice(i, i + 8);
+            await Promise.allSettled(batch.map(async u => {
+                const ex = await tileCache.match(u);
+                if (!ex) {
+                    try {
+                        const r = await fetch(u, { mode: 'no-cors' });
+                        if (r) {
+                            await tileCache.put(u, r);
+                            newlyCached++;
+                        }
+                    } catch(e) {}
+                }
+            }));
+        }
+
+        updateStatusUI(`🟢 Satellite Map 100% Offline Ready (${urls.length} tiles)`, true);
+        if (isUserExplicit || newlyCached > 0) {
+            showToastNotification(`🛰️ Satellite Map Downloaded: ${urls.length} tiles saved for offline survey!`);
+        }
+    } catch(err) {
+        console.warn('Tile cache error:', err.message);
+        updateStatusUI('📥 Download Satellite Map for Offline');
+    }
+};
+
+window.downloadCurrentBoundaryOfflineTiles = function() {
+    const coords = (currentRole === 'DFO' && currentBoundaryData) ? currentBoundaryData.coordinates : 
+                   (fieldActiveBoundaryData ? fieldActiveBoundaryData.coordinates : null);
+    const bId = (currentRole === 'DFO' && currentBoundaryData) ? currentBoundaryData.id : 
+                (fieldActiveBoundaryData ? fieldActiveBoundaryData.id : '');
+
+    if (!coords || coords.length < 3) {
+        alert('Please select an RF / RL boundary first to download its offline satellite map.');
+        return;
+    }
+
+    if (!navigator.onLine) {
+        showToastNotification('⚠️ Device is offline. Showing already cached satellite map.');
+        return;
+    }
+
+    window.autoCacheBoundarySatelliteTiles(coords, bId, true);
 };
 
 function renderActiveBoundary(shouldFitBounds = false) {
@@ -1059,20 +1135,37 @@ document.getElementById('kmlFileInput').addEventListener('change', async (e) => 
         return;
     }
 
-    const newPoly = {
-        id: `RF_${currentDivision.replace(/\s+/g, '_')}_${Date.now()}`,
-        name: bName,
-        division: currentDivision,
-        range: targetRange,
-        type: 'RF',
-        status: 'OFFICIAL',
-        coordinates: coords,
-        flaggedVertices: [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-    };
+    // Strictly overwrite existing RF if name matches in this division (NO duplicate RFs)
+    const allPolys = await window.surveyDB.getAll('polygons');
+    const cleanBName = bName.trim();
+    const existing = allPolys.find(p => 
+        (p.division || '').toLowerCase() === currentDivision.toLowerCase() &&
+        (p.name || '').trim().toLowerCase() === cleanBName.toLowerCase()
+    );
 
-    await window.surveyDB.put('polygons', newPoly);
+    let polyToSave;
+    if (existing) {
+        existing.range = targetRange;
+        existing.coordinates = coords;
+        existing.flaggedVertices = [];
+        existing.updated_at = new Date().toISOString();
+        polyToSave = existing;
+    } else {
+        polyToSave = {
+            id: `RF_${currentDivision.replace(/\s+/g, '_')}_${Date.now()}`,
+            name: cleanBName,
+            division: currentDivision,
+            range: targetRange,
+            type: 'RF',
+            status: 'OFFICIAL',
+            coordinates: coords,
+            flaggedVertices: [],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+        };
+    }
+
+    await window.surveyDB.put('polygons', polyToSave);
     if (navigator.onLine && window.surveyDB.syncCloud) {
         await window.surveyDB.syncCloud().catch(() => {});
     }
@@ -1226,19 +1319,36 @@ async function acceptFieldSurvey(surveyId) {
     }
 
     if (!savedPoly) {
-        // Create new official polygon
-        savedPoly = {
-            id: `RF_${survey.division.replace(/\s+/g, '_')}_${Date.now()}`,
-            name: survey.name,
-            division: survey.division,
-            range: survey.range,
-            type: 'RF',
-            status: 'OFFICIAL',
-            coordinates: survey.coordinates,
-            flaggedVertices: [],
-            created_at: new Date().toISOString()
-        };
-        await window.surveyDB.put('polygons', savedPoly);
+        // Check if an official polygon with same name exists in this division (overwrite it)
+        const allPolys = await window.surveyDB.getAll('polygons');
+        const cleanSurvName = (survey.name || '').trim().toLowerCase();
+        const existingByName = allPolys.find(p => 
+            (p.division || '').toLowerCase() === survey.division.toLowerCase() &&
+            (p.name || '').trim().toLowerCase() === cleanSurvName
+        );
+
+        if (existingByName) {
+            existingByName.coordinates = survey.coordinates;
+            existingByName.range = survey.range;
+            existingByName.status = 'OFFICIAL';
+            existingByName.updated_at = new Date().toISOString();
+            savedPoly = existingByName;
+            await window.surveyDB.put('polygons', existingByName);
+        } else {
+            savedPoly = {
+                id: `RF_${survey.division.replace(/\s+/g, '_')}_${Date.now()}`,
+                name: (survey.name || 'RF').trim(),
+                division: survey.division,
+                range: survey.range,
+                type: 'RF',
+                status: 'OFFICIAL',
+                coordinates: survey.coordinates,
+                flaggedVertices: [],
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            };
+            await window.surveyDB.put('polygons', savedPoly);
+        }
     }
 
     await window.surveyDB.delete('pending_surveys', surveyId);

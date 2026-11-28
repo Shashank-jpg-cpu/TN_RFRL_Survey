@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'TN_Forest_RFRL_Survey_DB_v5';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class SurveyDB {
     constructor() {
@@ -39,6 +39,11 @@ class SurveyDB {
                     userStore.createIndex('division', 'division', { unique: false });
                     userStore.createIndex('range', 'range', { unique: false });
                     userStore.createIndex('role', 'role', { unique: false });
+                }
+
+                // 4. Offline Map Tiles Store (Guaranteed Offline Satellite Storage)
+                if (!db.objectStoreNames.contains('offline_tiles')) {
+                    db.createObjectStore('offline_tiles', { keyPath: 'key' });
                 }
             };
 
@@ -174,6 +179,23 @@ class SurveyDB {
     }
 
     async put(storeName, item) {
+        // Enforce strict duplicate RF restriction: same name in same division overwrites existing
+        if (storeName === 'polygons' && item && item.division && item.name) {
+            try {
+                const existing = await this.getAll('polygons');
+                const cleanName = (item.name || '').trim().toLowerCase();
+                const cleanDiv = (item.division || '').trim().toLowerCase();
+                const dup = existing.find(p => 
+                    p.id !== item.id && 
+                    (p.division || '').trim().toLowerCase() === cleanDiv &&
+                    (p.name || '').trim().toLowerCase() === cleanName
+                );
+                if (dup) {
+                    item.id = dup.id; // Retain existing canonical ID to overwrite existing RF
+                }
+            } catch(e) {}
+        }
+
         return new Promise((resolve, reject) => {
             const tx = this.db.transaction(storeName, 'readwrite');
             const store = tx.objectStore(storeName);
@@ -181,6 +203,22 @@ class SurveyDB {
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
         });
+    }
+
+    async getTile(key) {
+        try {
+            return await this.get('offline_tiles', key);
+        } catch(e) {
+            return null;
+        }
+    }
+
+    async putTile(key, blob) {
+        try {
+            return await this.put('offline_tiles', { key, blob, timestamp: Date.now() });
+        } catch(e) {
+            return false;
+        }
     }
 
     async get(storeName, key) {

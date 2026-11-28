@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tn-forest-survey-v15';
+const CACHE_NAME = 'tn-forest-survey-v16';
 const TILE_CACHE = 'tn-forest-tiles-v1';
 
 const ASSETS_TO_CACHE = [
@@ -14,7 +14,6 @@ const ASSETS_TO_CACHE = [
   'https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js'
 ];
 
-// 1x1 Transparent PNG response for missing tiles when completely offline without cache
 const TRANSPARENT_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAAElFTkSuQmCC';
 
 function getTransparentTile() {
@@ -65,41 +64,51 @@ self.addEventListener('fetch', (e) => {
                     url.includes('arcgisonline.com') || 
                     url.includes('cartocdn.com');
 
-  // STRATEGY 1: SATELLITE MAP TILES (Cache-First with Parent-Zoom Scaling)
+  // STRATEGY 1: REAL SATELLITE MAP TILES (Offline Priority with Deep Zoom Scaling)
   if (isMapTile) {
     e.respondWith(
       caches.open(TILE_CACHE).then(async (tileCache) => {
+        // Normalize Google tile subdomains (mt0, mt1, mt2, mt3 -> mt1)
+        const normalizedUrl = url.replace(/mt[0-3]\.google\.com/, 'mt1.google.com');
+
         // 1. Check if exact tile is in local offline cache
-        const cached = await tileCache.match(e.request);
+        const cached = await tileCache.match(normalizedUrl) || await tileCache.match(url) || await tileCache.match(e.request);
         if (cached) return cached;
 
-        // 2. If online, fetch from network and cache
+        // 2. If online, fetch from network and store in cache
         if (navigator.onLine) {
           try {
             const netRes = await fetch(e.request);
             if (netRes && (netRes.status === 200 || netRes.type === 'opaque')) {
-              tileCache.put(e.request, netRes.clone());
+              tileCache.put(normalizedUrl, netRes.clone());
             }
             return netRes;
           } catch (err) {}
         }
 
-        // 3. Offline in forest: Look for parent zoom tile in cache (z-1)
+        // 3. Offline in forest: Search upward through parent zoom levels (z-1 down to 7)
+        // If an officer hasn't pre-cached deep zoom 17, this displays the real satellite imagery from parent zoom
         const googleMatch = url.match(/[?&]x=(\d+)&y=(\d+)&z=(\d+)/);
         if (googleMatch) {
           const x = parseInt(googleMatch[1]);
           const y = parseInt(googleMatch[2]);
           const z = parseInt(googleMatch[3]);
-          if (z > 10) {
-            const parentUrl = url.replace(`x=${x}`, `x=${Math.floor(x / 2)}`)
-                                 .replace(`y=${y}`, `y=${Math.floor(y / 2)}`)
-                                 .replace(`z=${z}`, `z=${z - 1}`);
+
+          for (let pz = z - 1; pz >= 7; pz--) {
+            const diff = z - pz;
+            const px = Math.floor(x / Math.pow(2, diff));
+            const py = Math.floor(y / Math.pow(2, diff));
+            const parentUrl = normalizedUrl.replace(/([?&])x=\d+/, `$1x=${px}`)
+                                           .replace(/([?&])y=\d+/, `$1y=${py}`)
+                                           .replace(/([?&])z=\d+/, `$1z=${pz}`);
             const parentCached = await tileCache.match(parentUrl);
-            if (parentCached) return parentCached;
+            if (parentCached) {
+              return parentCached;
+            }
           }
         }
 
-        // 4. Return clean transparent tile (Leaflet will display underlying cached layers smoothly)
+        // 4. Return transparent 1px tile if no parent exists
         return getTransparentTile();
       })
     );
