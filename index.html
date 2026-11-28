@@ -49,11 +49,11 @@
         </div>
 
         <div class="header-right">
-
-            <!-- Global Refresh Database Button (Visible on ALL devices: Mobile, APK, Desktop) -->
+            <!-- Global Refresh Database Button (Icon-only on mobile, full text on desktop) -->
             <button type="button" id="btnHeaderGlobalRefresh" class="btn-refresh-header" onclick="handleGlobalForceRefresh()" title="Sync with Cloud & Refresh All Boundaries">
-                <i class="fa-solid fa-arrows-rotate"></i> <span>Refresh Database</span>
+                <i class="fa-solid fa-arrows-rotate"></i> <span class="hide-mobile">Refresh Database</span>
             </button>
+
             <!-- Install Mobile App Button in Header (Desktop / Tablet) -->
             <button type="button" id="btnDownloadApkHeader" class="btn-apk-header hide-mobile" onclick="handleInstallApp()" title="Install TN RFRL Survey App">
                 <i class="fa-solid fa-mobile-screen-button"></i> <span>Install Mobile App</span>
@@ -64,21 +64,23 @@
                 <i class="fa-solid fa-crosshairs"></i> <span>RTK Mode</span>
             </button>
 
-            <!-- Offline / Online Connection Pill -->
+            <!-- Offline / Online Connection Pill (Compact on mobile) -->
             <div id="connectionPill" class="status-pill online">
                 <span class="status-dot"></span>
-                <span id="connectionText">ONLINE</span>
+                <span id="connectionText" class="hide-mobile">ONLINE</span>
             </div>
 
-            <!-- Active User Profile & Division with PROMINENT Logout Button -->
+            <!-- Active User Profile Role Badge -->
             <div id="userProfile" class="user-profile">
                 <span id="userRoleBadge" class="role-badge">DFO</span>
-                <span id="userDivisionName" class="user-name">Ranipet</span>
-                <button type="button" id="logoutBtn" class="btn-header-logout" onclick="handleLogout()" title="Log Out from Portal">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                    <span class="logout-label">Logout</span>
-                </button>
+                <span id="userDivisionName" class="user-name hide-mobile">—</span>
             </div>
+
+            <!-- PROMINENT RED LOGOUT BUTTON (Always visible on mobile & desktop, never pushed off-screen!) -->
+            <button type="button" id="logoutBtn" class="btn-header-logout" onclick="handleLogout()" title="Log Out from Portal">
+                <i class="fa-solid fa-right-from-bracket"></i>
+                <span class="logout-label">Logout</span>
+            </button>
         </div>
     </header>
 
@@ -110,17 +112,9 @@
 
                 <!-- Division and Filter Info -->
                 <div class="division-badge-card">
-                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <div>Division: <b id="dfoDivisionTitle" class="text-cyan">Chennai Division</b></div>
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <label style="margin: 0; font-size: 11px; color: #94a3b8;">Switch:</label>
-                            <select id="dfoSwitchDivisionSelect" class="form-control-sm" onchange="switchDfoDivision(this.value)" style="background: #0f172a; color: #38bdf8; border: 1px solid #0284c7; padding: 3px 6px; font-size: 11px; border-radius: 4px; font-weight: 700; cursor: pointer;">
-                            </select>
-                        </div>
-                    </div>
+                    <div>Division: <b id="dfoDivisionTitle" class="text-cyan">—</b></div>
                 </div>
 
-                <!-- Range Filter Dropdown (Filtered only to this DFO's ranges!) -->
                 <div class="form-group">
                     <label>Filter by Range</label>
                     <select id="dfoRangeSelect" class="form-control" onchange="filterDfoBoundaries()">

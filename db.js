@@ -486,7 +486,7 @@ class SurveyDB {
                             const localTime = local.updated_at ? new Date(local.updated_at).getTime() : (local.created_at ? new Date(local.created_at).getTime() : 0);
                             const cloudTime = p.updated_at ? new Date(p.updated_at).getTime() : (p.created_at ? new Date(p.created_at).getTime() : 0);
 
-                            if (cloudTime > localTime) {
+                            if (cloudTime >= localTime) {
                                 await this.put('polygons', p);
                             }
                         }
@@ -657,6 +657,9 @@ class SurveyDB {
         const cleanPass = (password || '').trim();
 
         if (role === 'DFO') {
+            if (navigator.onLine) {
+                try { await this.pullFromCloud(); } catch(e) {}
+            }
             // Verify against 51 DFO credentials directory
             const expectedCreds = window.getDfoCreds ? window.getDfoCreds(division) : null;
             const validUsername = expectedCreds ? expectedCreds.username.toLowerCase() : `dfo_${division.toLowerCase()}`;

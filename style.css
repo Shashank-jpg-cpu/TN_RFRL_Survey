@@ -1938,3 +1938,67 @@ body {
         gap: 4px;
     }
 }
+
+
+/* ========================================================================= */
+/* STANDALONE ALWAYS-VISIBLE LOGOUT BUTTON FOR MOBILE AND DESKTOP           */
+/* ========================================================================= */
+.btn-header-logout {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    background: #dc2626 !important;
+    color: #ffffff !important;
+    border: 1px solid #ef4444 !important;
+    padding: 6px 12px !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.45) !important;
+    transition: all 0.2s ease !important;
+    z-index: 99999 !important;
+}
+
+.btn-header-logout:hover {
+    background: #b91c1c !important;
+    transform: translateY(-1px) !important;
+}
+
+@media (max-width: 768px) {
+    .btn-header-logout {
+        padding: 6px 10px !important;
+        font-size: 11px !important;
+        gap: 4px !important;
+    }
+    .hide-mobile {
+        display: none !important;
+    }
+    .header-right {
+        gap: 6px !important;
+        flex-shrink: 0 !important;
+    }
+    .app-header {
+        padding: 0 8px !important;
+        overflow-x: hidden !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .header-titles h1 {
+        font-size: 12px !important;
+    }
+    .header-titles h2 {
+        display: none !important;
+    }
+    .btn-header-logout {
+        padding: 5px 8px !important;
+        font-size: 11px !important;
+    }
+    .btn-header-logout .logout-label {
+        display: inline !important;
+    }
+}

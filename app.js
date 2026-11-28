@@ -1,3 +1,33 @@
+
+// -------------------------------------------------------------------------
+// CLEAR ACTIVE BOUNDARY DISPLAY (Guarantees no boundary leaks across divisions!)
+// -------------------------------------------------------------------------
+function clearActiveBoundaryMap() {
+    if (activePolygonLayer) {
+        try { map.removeLayer(activePolygonLayer); } catch(e) {}
+        activePolygonLayer = null;
+    }
+    if (vertexMarkersGroup) {
+        vertexMarkersGroup.clearLayers();
+    }
+    activeMarkerInstances = [];
+    currentBoundaryData = null;
+    selectedVertexIndex = null;
+
+    const actRow = document.getElementById('boundaryActionRow');
+    if (actRow) actRow.style.display = 'none';
+    const detCard = document.getElementById('dfoDetailsCard');
+    if (detCard) detCard.style.display = 'none';
+    const vCard = document.getElementById('activeVertexCard');
+    if (vCard) vCard.style.display = 'none';
+
+    const mapInfo = document.getElementById('activeMapInfo');
+    if (mapInfo) mapInfo.textContent = 'No Active Boundary';
+    const mapBadge = document.getElementById('mapBoundaryBadge');
+    if (mapBadge) mapBadge.style.display = 'none';
+}
+window.clearActiveBoundaryMap = clearActiveBoundaryMap;
+
 // -------------------------------------------------------------------------
 // 10-DECIMAL PRECISION COORDINATE FORMATTER (High-Accuracy Cadastral GIS)
 // -------------------------------------------------------------------------
@@ -393,6 +423,7 @@ async function checkAuthSession() {
 
 let isLoggingOut = false;
 async function handleLogout(e) {
+    clearActiveBoundaryMap();
     if (e && e.preventDefault) e.preventDefault();
     if (e && e.stopPropagation) e.stopPropagation();
     if (isLoggingOut) return;
@@ -466,6 +497,7 @@ function closeInstallGuideModal() {
 // 3. DFO PORTAL: MANAGE ONLY THIS DIVISION'S RANGES & KML BOUNDARIES
 // -------------------------------------------------------------------------
 async function setupDfoPortal() {
+    clearActiveBoundaryMap();
     // 1. Cleanly pull latest cloud database once upon login
     if (navigator.onLine && window.surveyDB && window.surveyDB.pullFromCloud) {
         try { await window.surveyDB.pullFromCloud(); } catch(e) {}
@@ -477,21 +509,7 @@ async function setupDfoPortal() {
     }
     document.getElementById('fieldPanel').style.display = 'none';
     document.getElementById('dfoDivisionTitle').textContent = currentDivision;
-    // Populate DFO Switch Division Dropdown with all 51 divisions
-    const switchDivSel = document.getElementById('dfoSwitchDivisionSelect');
-    if (switchDivSel) {
-        switchDivSel.innerHTML = '';
-        const allDivs = Object.keys(window.TN_FOREST_HIERARCHY || {});
-        allDivs.forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d;
-            opt.textContent = d;
-            if (normalizeDivision(d) === normalizeDivision(currentDivision)) opt.selected = true;
-            switchDivSel.appendChild(opt);
-        });
-    }
-
-
+    
     // Populate DFO Range Filter
     const rangeSelect = document.getElementById('dfoRangeSelect');
     const uploadRangeSelect = document.getElementById('uploadRangeSelect');
@@ -529,12 +547,7 @@ async function loadDfoBoundaries() {
 
     if (filtered.length === 0) {
         bSelect.innerHTML = '<option value="">No RF/RL boundaries in database</option>';
-        document.getElementById('boundaryActionRow').style.display = 'none';
-        document.getElementById('dfoDetailsCard').style.display = 'none';
-        document.getElementById('activeVertexCard').style.display = 'none';
-        if (activePolygonLayer) map.removeLayer(activePolygonLayer);
-        vertexMarkersGroup.clearLayers();
-        activeMarkerInstances = [];
+        clearActiveBoundaryMap();
         return;
     }
 
@@ -558,7 +571,7 @@ function filterDfoBoundaries() {
 
 async function loadDfoActiveBoundary() {
     const id = document.getElementById('dfoBoundarySelect').value;
-    if (!id) return;
+    if (!id) { clearActiveBoundaryMap(); return; }
 
     currentBoundaryData = await window.surveyDB.get('polygons', id);
     if (!currentBoundaryData) return;
@@ -2424,42 +2437,4 @@ window.handleGlobalForceRefresh = async function() {
             icons.forEach(ic => ic.classList.remove('fa-spin'));
         }, 600);
     }
-};
-
-window.switchDfoDivision = async function(newDiv) {
-    if (!newDiv) return;
-    currentDivision = newDiv;
-    const titleEl = document.getElementById('dfoDivisionTitle');
-    if (titleEl) titleEl.textContent = newDiv;
-    const userDivEl = document.getElementById('userDivisionName');
-    if (userDivEl) userDivEl.textContent = newDiv;
-    const headerSub = document.getElementById('headerPortalSubtitle');
-    if (headerSub) headerSub.textContent = `DFO MASTER PORTAL — ${newDiv.toUpperCase()}`;
-
-    // Populate DFO Range Filter for new division
-    const rangeSelect = document.getElementById('dfoRangeSelect');
-    const uploadRangeSelect = document.getElementById('uploadRangeSelect');
-    if (rangeSelect) rangeSelect.innerHTML = '<option value="ALL">All Ranges in Division</option>';
-    if (uploadRangeSelect) uploadRangeSelect.innerHTML = '';
-
-    const ranges = (window.TN_FOREST_HIERARCHY && window.TN_FOREST_HIERARCHY[newDiv]) ? window.TN_FOREST_HIERARCHY[newDiv] : [];
-    ranges.forEach(r => {
-        if (rangeSelect) {
-            const opt1 = document.createElement('option');
-            opt1.value = r;
-            opt1.textContent = `${r} Range`;
-            rangeSelect.appendChild(opt1);
-        }
-        if (uploadRangeSelect) {
-            const opt2 = document.createElement('option');
-            opt2.value = r;
-            opt2.textContent = `${r} Range`;
-            uploadRangeSelect.appendChild(opt2);
-        }
-    });
-
-    await loadDfoBoundaries();
-    await loadPendingFieldSurveys();
-    await loadDfoStaffManagement();
-    showToastNotification(`Switched active division to: ${newDiv}`);
 };
