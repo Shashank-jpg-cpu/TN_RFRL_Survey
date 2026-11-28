@@ -113,33 +113,35 @@ function initMap() {
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     // 1. Google Satellite Hybrid (World-class Satellite Imagery + Road & Place Names)
+    // maxNativeZoom: 16 ensures Leaflet natively overscales tiles smoothly with CSS transforms beyond zoom 16
+    // This eliminates any 4-quadrant duplicate repeating tile glitches!
     const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 22,
-        maxNativeZoom: 18
+        maxNativeZoom: 16
     }).addTo(map);
 
     // 2. Google Satellite Only (Clean Imagery with no labels)
     const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
         maxZoom: 22,
-        maxNativeZoom: 18
+        maxNativeZoom: 16
     });
 
     // 3. Esri World Imagery (High-precision Satellite used by Forest Departments)
     const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         maxZoom: 22,
-        maxNativeZoom: 18
+        maxNativeZoom: 16
     });
 
     // 4. Google Terrain / Topographic (Shows forest hill contours and elevations)
     const googleTerrain = L.tileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
         maxZoom: 20,
-        maxNativeZoom: 16
+        maxNativeZoom: 15
     });
 
     // 5. CartoDB Voyager (Clean high-contrast vector street map)
     const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        maxNativeZoom: 18
+        maxZoom: 22,
+        maxNativeZoom: 16
     });
 
     // Add layer switcher control (Exact real satellite map layers)

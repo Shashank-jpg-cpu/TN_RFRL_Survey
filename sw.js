@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tn-forest-survey-v17';
+const CACHE_NAME = 'tn-forest-survey-v18';
 const TILE_CACHE = 'tn-forest-tiles-v1';
 
 const ASSETS_TO_CACHE = [
@@ -87,29 +87,8 @@ self.addEventListener('fetch', (e) => {
           } catch (err) {}
         }
 
-        // 3. Offline in forest: Search upward through parent zoom levels (z-1 down to 7)
-        // If an officer hasn't pre-cached deep zoom 17, this displays the real satellite imagery from parent zoom
-        const googleMatch = url.match(/[?&]x=(\d+)&y=(\d+)&z=(\d+)/);
-        if (googleMatch) {
-          const x = parseInt(googleMatch[1]);
-          const y = parseInt(googleMatch[2]);
-          const z = parseInt(googleMatch[3]);
-
-          for (let pz = z - 1; pz >= 7; pz--) {
-            const diff = z - pz;
-            const px = Math.floor(x / Math.pow(2, diff));
-            const py = Math.floor(y / Math.pow(2, diff));
-            const parentUrl = normalizedUrl.replace(/([?&])x=\d+/, `$1x=${px}`)
-                                           .replace(/([?&])y=\d+/, `$1y=${py}`)
-                                           .replace(/([?&])z=\d+/, `$1z=${pz}`);
-            const parentCached = await tileCache.match(parentUrl);
-            if (parentCached) {
-              return parentCached;
-            }
-          }
-        }
-
-        // 4. Return transparent 1px tile if no parent exists
+        // 3. Offline in forest: Return clean transparent tile if exact zoom is not cached
+        // Leaflet natively hardware-scales the maxNativeZoom tile with CSS transforms (prevents 4-quadrant tile repetition glitch)
         return getTransparentTile();
       })
     );
