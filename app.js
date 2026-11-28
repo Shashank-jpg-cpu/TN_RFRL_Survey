@@ -90,6 +90,15 @@ let isMapClickActive = false;
 let previewSurveyLayer = null;
 let previewMarkersGroup = null;
 
+// Immediately purge legacy corrupted tile cache if present
+if ('caches' in window) {
+    caches.delete('tn-forest-tiles-v1').catch(() => {});
+    caches.delete('tn-forest-survey-v17').catch(() => {});
+    caches.delete('tn-forest-survey-v18').catch(() => {});
+    caches.delete('tn-forest-survey-v19').catch(() => {});
+    caches.delete('tn-forest-survey-v20').catch(() => {});
+}
+
 window.addEventListener('DOMContentLoaded', async () => {
     await window.surveyDB.init();
     populateLoginDivisions();
@@ -117,19 +126,22 @@ function initMap() {
     // This eliminates any 4-quadrant duplicate repeating tile glitches!
     const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 22,
-        maxNativeZoom: 16
+        maxNativeZoom: 16,
+        keepBuffer: 6
     }).addTo(map);
 
     // 2. Google Satellite Only (Clean Imagery with no labels)
     const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
         maxZoom: 22,
-        maxNativeZoom: 16
+        maxNativeZoom: 16,
+        keepBuffer: 6
     });
 
     // 3. Esri World Imagery (High-precision Satellite used by Forest Departments)
     const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         maxZoom: 22,
-        maxNativeZoom: 16
+        maxNativeZoom: 16,
+        keepBuffer: 6
     });
 
     // 4. Google Terrain / Topographic (Shows forest hill contours and elevations)
@@ -631,7 +643,7 @@ let lastCachedBoundaryId = null;
 window.preCacheTamilNaduBaseTiles = async function() {
     if (!navigator.onLine || !('caches' in window)) return;
     try {
-        const tileCache = await caches.open('tn-forest-tiles-v1');
+        const tileCache = await caches.open('tn-forest-tiles-v2');
         const lon2tile = (lon, z) => Math.floor((lon + 180) / 360 * Math.pow(2, z));
         const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
 
@@ -713,8 +725,8 @@ window.autoCacheBoundarySatelliteTiles = async function(coordinates, boundaryId 
         const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
 
         const urls = [];
-        // Cache zoom levels 12 to 17 (full cadastral satellite resolution)
-        for (let z = 12; z <= 17; z++) {
+        // Cache zoom levels 12 to 16 (full cadastral satellite resolution)
+        for (let z = 12; z <= 16; z++) {
             const xMin = lon2tile(minLon, z);
             const xMax = lon2tile(maxLon, z);
             const yMin = lat2tile(maxLat, z);
@@ -730,7 +742,7 @@ window.autoCacheBoundarySatelliteTiles = async function(coordinates, boundaryId 
             }
         }
 
-        const tileCache = await caches.open('tn-forest-tiles-v1');
+        const tileCache = await caches.open('tn-forest-tiles-v2');
         let newlyCached = 0;
 
         for (let i = 0; i < urls.length; i += 8) {
@@ -2697,9 +2709,37 @@ function showToastNotification(msg) {
 window.handleGlobalForceRefresh = async function() {
     const icons = document.querySelectorAll('.fa-arrows-rotate');
     icons.forEach(ic => ic.classList.add('fa-spin'));
-    showToastNotification('Syncing latest boundaries, staff & surveys from Cloud...');
+    showToastNotification('Syncing latest boundaries, staff, and updating offline map...');
 
     try {
+        // 1. Force update Service Worker and clear stale legacy tile caches
+        if ('serviceWorker' in navigator) {
+            try {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                for (const reg of regs) {
+                    await reg.update();
+                }
+            } catch(e) {}
+        }
+        if ('caches' in window) {
+            try {
+                await caches.delete('tn-forest-tiles-v1');
+                await caches.delete('tn-forest-survey-v17');
+                await caches.delete('tn-forest-survey-v18');
+                await caches.delete('tn-forest-survey-v19');
+                await caches.delete('tn-forest-survey-v20');
+            } catch(e) {}
+        }
+
+        // 2. Redraw map layers if loaded to instantly wipe any old cached tiles from DOM
+        if (typeof map !== 'undefined' && map) {
+            map.eachLayer(layer => {
+                if (layer && typeof layer.redraw === 'function') {
+                    layer.redraw();
+                }
+            });
+        }
+
         if (window.surveyDB && window.surveyDB.pullFromCloud) {
             await window.surveyDB.pullFromCloud();
         }
