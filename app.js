@@ -114,54 +114,41 @@ function initMap() {
     // 1. Google Satellite Hybrid (World-class Satellite Imagery + Road & Place Names)
     const googleHybrid = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
         maxZoom: 22,
+        maxNativeZoom: 18,
         subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
     }).addTo(map);
 
     // 2. Google Satellite Only (Clean Imagery with no labels)
     const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-        maxZoom: 22
+        maxZoom: 22,
+        maxNativeZoom: 18
     });
 
     // 3. Esri World Imagery (High-precision Satellite used by Forest Departments)
     const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19
+        maxZoom: 22,
+        maxNativeZoom: 18
     });
 
     // 4. Google Terrain / Topographic (Shows forest hill contours and elevations)
     const googleTerrain = L.tileLayer('https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}', {
-        maxZoom: 20
+        maxZoom: 20,
+        maxNativeZoom: 16
     });
 
     // 5. CartoDB Voyager (Clean high-contrast vector street map)
     const cartoLight = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19
+        maxZoom: 19,
+        maxNativeZoom: 18
     });
 
-    // 6. Cadastral Survey Grid (100% Offline Vector Grid Base)
-    const offlineCadastral = L.tileLayer(
-        'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">' +
-            '<rect width="256" height="256" fill="#0d1f16" stroke="#163826" stroke-width="1"/>' +
-            '<line x1="0" y1="64" x2="256" y2="64" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
-            '<line x1="0" y1="128" x2="256" y2="128" stroke="#1f4d35" stroke-width="0.8"/>' +
-            '<line x1="0" y1="192" x2="256" y2="192" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
-            '<line x1="64" y1="0" x2="64" y2="256" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
-            '<line x1="128" y1="0" x2="128" y2="256" stroke="#1f4d35" stroke-width="0.8"/>' +
-            '<line x1="192" y1="0" x2="192" y2="256" stroke="#173b28" stroke-width="0.5" stroke-dasharray="3,3"/>' +
-            '<circle cx="128" cy="128" r="2.5" fill="#22c55e" opacity="0.4"/>' +
-            '<text x="128" y="132" fill="#22c55e" font-size="8.5" font-family="-apple-system, sans-serif" text-anchor="middle" font-weight="bold" opacity="0.5">OFFLINE CADASTRE GRID</text>' +
-            '</svg>'
-        ), { maxZoom: 22 }
-    );
-
-    // Add layer switcher control
+    // Add layer switcher control (Exact real satellite map layers)
     L.control.layers({
         'Google Satellite Hybrid': googleHybrid,
         'Google Satellite (Clean)': googleSat,
         'Esri World Satellite': esriSat,
         'Topographic / Terrain Contours': googleTerrain,
-        'Street Map (Voyager)': cartoLight,
-        'Offline Cadastre Grid': offlineCadastral
+        'Street Map (Voyager)': cartoLight
     }, null, { position: 'topright' }).addTo(map);
 
     vertexMarkersGroup = L.layerGroup().addTo(map);
@@ -608,6 +595,87 @@ async function loadDfoActiveBoundary() {
     }
 }
 
+
+// -------------------------------------------------------------------------
+// REAL SATELLITE MAP OFFLINE PRE-CACHE ENGINE
+// Pre-downloads exact satellite tiles covering the selected RF boundary
+// -------------------------------------------------------------------------
+let lastCachedBoundaryId = null;
+
+window.autoCacheBoundarySatelliteTiles = function(coordinates, boundaryId = '') {
+    if (!navigator.onLine || !coordinates || coordinates.length < 3) return;
+    if (!('caches' in window)) return;
+    if (boundaryId && boundaryId === lastCachedBoundaryId) return;
+    lastCachedBoundaryId = boundaryId;
+
+    setTimeout(async () => {
+        try {
+            let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
+            coordinates.forEach(c => {
+                const lon = c[0];
+                const lat = c[1];
+                if (lat < minLat) minLat = lat;
+                if (lat > maxLat) maxLat = lat;
+                if (lon < minLon) minLon = lon;
+                if (lon > maxLon) maxLon = lon;
+            });
+
+            // 15% safety buffer around forest reserve boundary
+            const latPad = Math.max((maxLat - minLat) * 0.15, 0.005);
+            const lonPad = Math.max((maxLon - minLon) * 0.15, 0.005);
+            minLat -= latPad; maxLat += latPad;
+            minLon -= lonPad; maxLon += lonPad;
+
+            const lon2tile = (lon, z) => Math.floor((lon + 180) / 360 * Math.pow(2, z));
+            const lat2tile = (lat, z) => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z));
+
+            const urls = [];
+            // Cache zoom levels 13 to 17 (covers high-res satellite down to sub-meter details)
+            for (let z = 13; z <= 17; z++) {
+                const xMin = lon2tile(minLon, z);
+                const xMax = lon2tile(maxLon, z);
+                const yMin = lat2tile(maxLat, z);
+                const yMax = lat2tile(minLat, z);
+
+                const tileCount = (xMax - xMin + 1) * (yMax - yMin + 1);
+                if (tileCount > 300) continue; // safety limit
+
+                for (let x = xMin; x <= xMax; x++) {
+                    for (let y = yMin; y <= yMax; y++) {
+                        urls.push(`https://mt1.google.com/vt/lyrs=y&x=${x}&y=${y}&z=${z}`);
+                    }
+                }
+            }
+
+            const tileCache = await caches.open('tn-forest-tiles-v1');
+            let cachedCount = 0;
+
+            // Fetch concurrently in small batches
+            for (let i = 0; i < urls.length; i += 6) {
+                const batch = urls.slice(i, i + 6);
+                await Promise.allSettled(batch.map(async url => {
+                    const existing = await tileCache.match(url);
+                    if (!existing) {
+                        try {
+                            const res = await fetch(url, { mode: 'no-cors' });
+                            if (res) {
+                                await tileCache.put(url, res);
+                                cachedCount++;
+                            }
+                        } catch(e) {}
+                    }
+                }));
+            }
+
+            if (cachedCount > 0) {
+                showToastNotification(`🛰️ Satellite Map Cached: ${cachedCount} tiles ready for offline survey!`);
+            }
+        } catch(e) {
+            console.warn('[Offline Map] Pre-cache error:', e.message);
+        }
+    }, 500);
+};
+
 function renderActiveBoundary(shouldFitBounds = false) {
     if (activePolygonLayer) map.removeLayer(activePolygonLayer);
     vertexMarkersGroup.clearLayers();
@@ -632,6 +700,9 @@ function renderActiveBoundary(shouldFitBounds = false) {
 
     if (shouldFitBounds) {
         map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    }
+    if (window.autoCacheBoundarySatelliteTiles && currentBoundaryData && currentBoundaryData.coordinates) {
+        window.autoCacheBoundarySatelliteTiles(currentBoundaryData.coordinates, currentBoundaryData.id);
     }
 
     // Click on boundary line to insert intermediate sub-point (e.g. 6a, 6b...)
@@ -1512,6 +1583,13 @@ window.renderFieldActiveBoundary = function(shouldFitBounds = false) {
 
     if (shouldFitBounds) {
         map.fitBounds(activePolygonLayer.getBounds(), { padding: [40, 40] });
+    }
+    if (window.autoCacheBoundarySatelliteTiles && currentBoundaryData && currentBoundaryData.coordinates) {
+        window.autoCacheBoundarySatelliteTiles(currentBoundaryData.coordinates, currentBoundaryData.id);
+    }
+
+    if (window.autoCacheBoundarySatelliteTiles && fieldActiveBoundaryData && fieldActiveBoundaryData.coordinates) {
+        window.autoCacheBoundarySatelliteTiles(fieldActiveBoundaryData.coordinates, fieldActiveBoundaryData.id);
     }
 
     // Render Draggable, Clickable Cairn Markers

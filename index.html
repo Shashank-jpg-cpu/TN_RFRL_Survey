@@ -32,7 +32,7 @@
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js?v=14').then(reg => {
+                navigator.serviceWorker.register('sw.js?v=15').then(reg => {
                     reg.update();
                 }).catch(err => console.log('SW reg error:', err));
             });
@@ -730,9 +730,6 @@
                     </button>
                 </div>
 
-                <a href="TN_Forest_All_51_Divisions_DFO_Credentials.pdf" download class="btn-download-pdf-creds" title="Download Official 51 Divisions DFO Master Credentials (PDF)">
-                    <i class="fa-solid fa-file-pdf"></i> Download 51 Divisions DFO Credentials (PDF)
-                </a>
 
                 <button type="button" class="btn-sync-cloud-login" onclick="handleGlobalForceRefresh()" style="width: 100%; margin-bottom: 12px; background: rgba(2, 132, 199, 0.15); border: 1px solid #0284c7; color: #38bdf8; padding: 9px 12px; border-radius: 6px; font-weight: 700; font-size: 12px; cursor: pointer;">
                     <i class="fa-solid fa-arrows-rotate"></i> Sync Latest Cloud Database (All 51 Divisions)
